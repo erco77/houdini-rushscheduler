@@ -4,23 +4,23 @@
 # NAME:         pythonscheduler.py ( Python )
 
 # OS
-import os,sys,re,time,threading
+import os,sys,re,time,json,threading
 
 # HOUDINI
 import pdg
 from pdg.scheduler import PyScheduler
 from pdg.job.callbackserver import CallbackServerMixin
 
-def SaveJson(filename, data):
+def SaveJSON(filename, data):
     '''
     Save json data to 'filename'
     May raise IOError exceptions on file errors.
     '''
     fd = open(filename, "w")
-    fd.write(json.dumps(workdata,sort_keys=True, indent=4))
+    fd.write(json.dumps(data,sort_keys=True, indent=4))
     fd.close()
 
-def LoadJson(filename):
+def LoadJSON(filename):
     '''
     Load json data from 'filename', returns data on success.
     May raise IOError exceptions on file errors.
@@ -108,49 +108,31 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         temp_dir = str(self.tempDir(False))
 
         # Put all workitem data into a dict we can save as a json object
-        workdata = { "job_env":
-                        {
-                        "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
-                        "PDG_ITEM_NAME":     str(work_item.name),
-                        "PDG_ITEM_ID":       str(work_item.id),
-                        "PDG_DIR":           str(self.workingDir(False)),
-                        "PDG_TEMP":          temp_dir,
-                        "PDG_SCRIPTDIR":     str(self.scriptDir(False))
+        workitem_data = { "job_env":
+                            {
+                                "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+                                "PDG_ITEM_NAME":     str(work_item.name),
+                                "PDG_ITEM_ID":       str(work_item.id),
+                                "PDG_DIR":           str(self.workingDir(False)),
+                                "PDG_TEMP":          temp_dir,
+                                "PDG_SCRIPTDIR":     str(self.scriptDir(False))
+                            },
+                          "command": item_command,
+                          "rush_frame": "%04d" % work_item.id,
+                          "sched_name": self.sched_name
                         }
-                    }
 
-        job_env = os.environ.copy()
-        job_env['PDG_RESULT_SERVER'] = str(self.workItemResultServerAddr())
-        job_env['PDG_ITEM_NAME'] = str(work_item.name)
-        job_env['PDG_ITEM_ID'] = str(work_item.id)
-        job_env['PDG_DIR'] = str(self.workingDir(False))
-        job_env['PDG_TEMP'] = temp_dir
-        job_env['PDG_SCRIPTDIR'] = str(self.scriptDir(False))
+        json_filename = "%s/rush-%04d.json" % (temp_dir, work_item.id)
+        try:
+            SaveJSON(json_filename, workitem_data)
+        except IOError as e:
+            print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
+            return pdg.scheduleResult.CookFailed
 
-        # accumulate req
-        print("        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
-              "    PDG_RESULT_SERVER: %s\n" % job_env['PDG_RESULT_SERVER'] +
-              "        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
-              "          PDG_ITEM_ID: %s\n" % job_env['PDG_ITEM_ID'] +
-              "              PDG_DIR: %s\n" % job_env['PDG_DIR'] + 
-              "             PDG_TEMP: %s\n" % job_env['PDG_TEMP'] + 
-              "        PDG_SCRIPTDIR: %s\n" % job_env['PDG_SCRIPTDIR'] +
-              "\n" +
-              "     work_item id: %s\n" % work_item.id +
-              "   work_item name: %s\n" % work_item.name +
-              "  work_item label: %s\n" % work_item.label +
-              "\n" +
-              "    EXECUTING: %s" % item_command)
+        print("    Wrote json file: %s" % json_filename)
 
-
-        # run the given command in a shell
-        # returncode = subprocess.call(item_command, shell=True, env=job_env)
-        returncode = 0
-
-        # if the return code is non-zero, report it as failed
-        if returncode == 0:
-            return pdg.scheduleResult.CookSucceeded
-        return pdg.scheduleResult.CookFailed
+        # TODO: Queue work item for child thread
+        return pdg.scheduleResult.CookSucceeded
 
     def onTransferFile(self, file_path):
         # Custom transferFile logic. Returns True on success, else False.
