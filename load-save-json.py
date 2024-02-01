@@ -4,28 +4,24 @@
 import os,sys,re,time,json,threading
 
 def SaveJson(filename, data):
-    try:
-        fd = open(filename, "w")
-    except IOError as e:
-        return "SaveJson: could not create '%s': %s" % (filename, e.strerror)
+    '''
+    Save json data to 'filename'
+    May raise IOError exceptions on file errors.
+    '''
+    fd = open(filename, "w")
     fd.write(json.dumps(workdata,sort_keys=True, indent=4))
     fd.close()
-    return None
 
 def LoadJson(filename):
-    '''Load json data from 'filename', returns data on success, or error msg on failure.
-       Returns:
-           On success: (None, data)
-           On failure: (emsg, None)
     '''
-    try:
-        fd = open(filename, "r")
-    except IOError as e:
-        emsg = "LoadJson: could not open '%s': %s" % (filename, e.strerror)
-        return (emsg, None)
+    Load json data from 'filename', returns data on success.
+    May raise IOError exceptions on file errors.
+    Returns data loaded from json file.
+    '''
+    fd   = open(filename, "r")
     data = json.load(fd)
     fd.close()
-    return (None, data)
+    return data
 
 # MAIN
 workdata = { "job_env":
@@ -41,20 +37,22 @@ workdata = { "job_env":
 
 # TEST SAVE
 filename = "./test.json"
-emsg = SaveJson(filename, workdata)
-if emsg != None:
-    print("ERROR: %s" % emsg)
-else:
-    print("OK: Created %s" % filename)
+try: SaveJson(filename, workdata)
+except IOError as e:
+    print("ERROR: SaveJson() could not create '%s': %s" % (filename, e.strerror))
+    sys.exit(1)
+print("OK: Created %s" % filename)
 
 # TEST LOAD
 workdata = {}
-(emsg,workdata) = LoadJson(filename)
-if emsg != None:
-    print("ERROR: %s" % emsg)
-else:
-    print("workdata: %s" % workdata)
-    print("job_env: %s" % workdata["job_env"])
-    for i in workdata["job_env"]:
-        print("    %20s=%s" % (i, workdata["job_env"][i]))
+try: workdata = LoadJson(filename)
+except IOError as e:
+    print("ERROR: LoadJson: could not open '%s': %s" % (filename, e.strerror))
+    sys.exit(1)
+
+# SHOW WHAT WAS LOADED
+print("workdata: %s" % workdata)
+print("job_env: %s" % workdata["job_env"])
+for i in workdata["job_env"]:
+    print("    %20s=%s" % (i, workdata["job_env"][i]))
 
