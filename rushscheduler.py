@@ -11,13 +11,32 @@ import pdg
 from pdg.scheduler import PyScheduler
 from pdg.job.callbackserver import CallbackServerMixin
 
+def SaveJson(filename, data):
+    '''
+    Save json data to 'filename'
+    May raise IOError exceptions on file errors.
+    '''
+    fd = open(filename, "w")
+    fd.write(json.dumps(workdata,sort_keys=True, indent=4))
+    fd.close()
+
+def LoadJson(filename):
+    '''
+    Load json data from 'filename', returns data on success.
+    May raise IOError exceptions on file errors.
+    Returns data loaded from json file.
+    '''
+    fd   = open(filename, "r")
+    data = json.load(fd)
+    fd.close()
+    return data
+
 class RushScheduler(CallbackServerMixin, PyScheduler):
     """
-    Python scheduler implementation
+    Rush scheduler implementation
     """
-    lock_      = threading.Semaphore()      # create semaphore lock object
-    jobid_     = None                       # rush jobid (if any)
-    workitems_ = []                         # cached workitems
+    jobs = {}                     # job data instance (indexed by rushsched name)
+    sched_name = None
 
     def __init__(self, scheduler, name):
         """
@@ -25,12 +44,113 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         Initializes the Scheduler with a C++ scheduler reference and name
         """
+        print("-- INIT:")
         PyScheduler.__init__(self, scheduler, name)
         CallbackServerMixin.__init__(self, True)
+        self.sched_name = name            # save our instance name for later
 
     @classmethod
     def templateName(cls):
         return "python_scheduler"
+
+    def onStartCook(self, static, cook_set):
+        # Custom onStartCook logic. Returns True if started.
+        #
+        # The following variables are available:
+        # self          -  A reference to the current pdg.Scheduler instance
+        # static        -  True if static cook
+        # cook_set      -  Set of nodes to cook
+
+        # repr(cook_set) is a list, first item is a "Processor", so see:
+        # https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
+
+        print("--- onStartCook [%s]" % self.sched_name)
+
+        # New scheduler?
+        name = self.sched_name
+        if name not in self.jobs:
+            self.jobs[name] = {}     # new dict for this scheduler
+
+        # Reset this scheduler's dict
+        self.jobs[name]["lock"]       = threading.Semaphore()
+        self.jobs[name]["child_id"]   = None
+        self.jobs[name]["jobid"]      = None
+        self.jobs[name]["work_items"] = []
+
+        wd = self["pdg_workingdir"].evaluateString()
+        self.setWorkingDir(wd, wd)
+
+        if not self.isCallbackServerRunning():
+            self.startCallbackServer()
+
+        return True
+
+    def onSchedule(self, work_item):
+        # ERCO: This runs to start new work items (Rush frames).
+        #
+        # Custom onSchedule logic. Returns pdg.ScheduleResult.
+        #
+        # The following variables are available:
+        # self          -  A reference to the current pdg.Scheduler instance
+        # work_item     -  The pdg.WorkItem to schedule
+
+        print("--- onSchedule [%s]" % self.sched_name)
+        print("    workitem.id: %d" % work_item.id)
+        print("     rush frame: %04d" % work_item.id)
+
+        # Ensure directories exist and serialize the work item
+        self.createJobDirsAndSerializeWorkItems(work_item)
+
+        # expand the special __PDG_* tokens in the work item command
+        item_command = self.expandCommandTokens(work_item.command, work_item)
+
+        # add special PDG_* variables to the job's environment
+        temp_dir = str(self.tempDir(False))
+
+        # Put all workitem data into a dict we can save as a json object
+        workdata = { "job_env":
+                        {
+                        "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+                        "PDG_ITEM_NAME":     str(work_item.name),
+                        "PDG_ITEM_ID":       str(work_item.id),
+                        "PDG_DIR":           str(self.workingDir(False)),
+                        "PDG_TEMP":          temp_dir,
+                        "PDG_SCRIPTDIR":     str(self.scriptDir(False))
+                        }
+                    }
+
+        job_env = os.environ.copy()
+        job_env['PDG_RESULT_SERVER'] = str(self.workItemResultServerAddr())
+        job_env['PDG_ITEM_NAME'] = str(work_item.name)
+        job_env['PDG_ITEM_ID'] = str(work_item.id)
+        job_env['PDG_DIR'] = str(self.workingDir(False))
+        job_env['PDG_TEMP'] = temp_dir
+        job_env['PDG_SCRIPTDIR'] = str(self.scriptDir(False))
+
+        # accumulate req
+        print("        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
+              "    PDG_RESULT_SERVER: %s\n" % job_env['PDG_RESULT_SERVER'] +
+              "        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
+              "          PDG_ITEM_ID: %s\n" % job_env['PDG_ITEM_ID'] +
+              "              PDG_DIR: %s\n" % job_env['PDG_DIR'] + 
+              "             PDG_TEMP: %s\n" % job_env['PDG_TEMP'] + 
+              "        PDG_SCRIPTDIR: %s\n" % job_env['PDG_SCRIPTDIR'] +
+              "\n" +
+              "     work_item id: %s\n" % work_item.id +
+              "   work_item name: %s\n" % work_item.name +
+              "  work_item label: %s\n" % work_item.label +
+              "\n" +
+              "    EXECUTING: %s" % item_command)
+
+
+        # run the given command in a shell
+        # returncode = subprocess.call(item_command, shell=True, env=job_env)
+        returncode = 0
+
+        # if the return code is non-zero, report it as failed
+        if returncode == 0:
+            return pdg.scheduleResult.CookSucceeded
+        return pdg.scheduleResult.CookFailed
 
     def onTransferFile(self, file_path):
         # Custom transferFile logic. Returns True on success, else False.
@@ -52,63 +172,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         print("--- submitAsJob")
         return ""
-
-    def onSchedule(self, work_item):
-        # ERCO: This runs to start new work items (Rush frames).
-        #
-        # Custom onSchedule logic. Returns pdg.ScheduleResult.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # work_item     -  The pdg.WorkItem to schedule
-
-        print("--- onSchedule")
-        import subprocess
-        import os
-        import sys
-
-        # Ensure directories exist and serialize the work item
-        self.createJobDirsAndSerializeWorkItems(work_item)
-
-        # expand the special __PDG_* tokens in the work item command
-        item_command = self.expandCommandTokens(work_item.command, work_item)
-
-        # add special PDG_* variables to the job's environment
-        temp_dir = str(self.tempDir(False))
-
-        job_env = os.environ.copy()
-        job_env['PDG_RESULT_SERVER'] = str(self.workItemResultServerAddr())
-        job_env['PDG_ITEM_NAME'] = str(work_item.name)
-        job_env['PDG_ITEM_ID'] = str(work_item.id)
-        job_env['PDG_DIR'] = str(self.workingDir(False))
-        job_env['PDG_TEMP'] = temp_dir
-        job_env['PDG_SCRIPTDIR'] = str(self.scriptDir(False))
-
-        # accumulate req
-        print("--- RUSH onSchedule:\n" +
-                "        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
-                "    PDG_RESULT_SERVER: %s\n" % job_env['PDG_RESULT_SERVER'] +
-                "        PDG_ITEM_NAME: %s\n" % job_env['PDG_ITEM_NAME'] +
-                "          PDG_ITEM_ID: %s\n" % job_env['PDG_ITEM_ID'] +
-                "              PDG_DIR: %s\n" % job_env['PDG_DIR'] + 
-                "             PDG_TEMP: %s\n" % job_env['PDG_TEMP'] + 
-                "        PDG_SCRIPTDIR: %s\n" % job_env['PDG_SCRIPTDIR'] +
-                "\n" +
-                "     work_item id: %s\n" % work_item.id +
-                "   work_item name: %s\n" % work_item.name +
-                "  work_item label: %s\n" % work_item.label +
-                "\n" +
-                "    EXECUTING: %s" % item_command)
-
-
-        # run the given command in a shell
-        # returncode = subprocess.call(item_command, shell=True, env=job_env)
-        returncode = 0
-
-        # if the return code is non-zero, report it as failed
-        if returncode == 0:
-            return pdg.scheduleResult.CookSucceeded
-        return pdg.scheduleResult.CookFailed
 
     def onScheduleStatic(self, dependencies, dependents, ready_items):
         # Custom onScheduleStatic logic.
@@ -145,29 +208,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         print("--- onStop")
         self.stopCallbackServer()
-
-        return True
-
-    def onStartCook(self, static, cook_set):
-        # Custom onStartCook logic. Returns True if started.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # static        -  True if static cook
-        # cook_set      -  Set of nodes to cook
-
-        # repr(cook_set) says it's a list, first item seems to be of type "Processor", so see:
-        # https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
-
-        print("--- onStartCook")
-        processor = cook_set[0]
-        rush_sched_name = processor.scheduler.name
-
-        wd = self["pdg_workingdir"].evaluateString()
-        self.setWorkingDir(wd, wd)
-
-        if not self.isCallbackServerRunning():
-            self.startCallbackServer()
 
         return True
 
