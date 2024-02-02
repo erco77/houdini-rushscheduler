@@ -53,6 +53,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     def templateName(cls):
         return "python_scheduler"
 
+    def QueueWorkItem(self, workitem_data):
+        # TBD:
+        #    1) thread lock
+        #    2) add to self.jobs[]
+        #    3) unlock
+        #
+        # If rush job and child thread isn't started, start them!
+        # Or if parent should do this, check if it did and fail if not.
+        #
+        return ""
+
     def onStartCook(self, static, cook_set):
         # Custom onStartCook logic. Returns True if started.
         #
@@ -95,8 +106,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # work_item     -  The pdg.WorkItem to schedule
 
         print("--- onSchedule [%s]" % self.sched_name)
-        print("    workitem.id: %d" % work_item.id)
-        print("     rush frame: %04d" % work_item.id)
+        print("      workitem.id: %d" % work_item.id)
+        print("       rush frame: %04d" % work_item.id)
+        print("    workitem.name: %s" % work_item.name)
 
         # Ensure directories exist and serialize the work item
         self.createJobDirsAndSerializeWorkItems(work_item)
@@ -119,7 +131,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                             },
                           "command": item_command,
                           "rush_frame": "%04d" % work_item.id,
-                          "sched_name": self.sched_name
+                          "sched_name": self.sched_name,
+                          "workitem_name": work_item.name
                         }
 
         json_filename = "%s/rush-%04d.json" % (temp_dir, work_item.id)
@@ -130,6 +143,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             return pdg.scheduleResult.CookFailed
 
         print("    Wrote json file: %s" % json_filename)
+
+        self.QueueWorkItem(workitem_data)
 
         # TODO: Queue work item for child thread
         return pdg.scheduleResult.CookSucceeded
