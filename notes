@@ -95,3 +95,31 @@ DURING RUN
 
 ----
 
+== Reporting Cook Error Messages ==
+
+   import CookError             -- cook exception
+
+    * The following is run from onTick() to trap an exception:
+
+        except Exception:
+            # Don't raise exception which will kill timer thread
+            self.cookError('{}'.format(traceback.format_exc(1)))
+
+
+    * The following run from onTick() to advertise an error
+      and cancel the cook scheduling:
+
+        self.cookError('Returning cancel cook due to MQ Relay error: {}'.format(mq_error))
+        return tickResult.SchedulerCancelCook
+
+
+    * The following is run from onTick():
+
+        except Exception as e:
+            [..]
+            fail_msg = ('Failed to connect to MQ server at {}:{} with error:\n"{}"!\n'
+                        'Try disabling network firewall or allow PDG MQ ports in '
+                        'firewall setting.').format(mqaddr, relay_port, str(e))
+            raise CookError(fail_msg)
+                  ^^^^^^^^^^^^^^^^^^^
+
