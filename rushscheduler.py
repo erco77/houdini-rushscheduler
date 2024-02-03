@@ -59,66 +59,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd.close()
         return data
 
-    def SaveRenderScript(self, filename, python_cmd, temp_dir):
-        '''
-        Create the rush render script that loads the json file and runs
-        the houdini work item.
-        '''
-        fd = open(filename, "w")
-        # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
-        fd.write('#!' + python_cmd + '''
-import os,sys,json,subprocess
-
-# Rush render script for rushscheduler generated work items
-
-def LoadJSON(filename):
-    'Load a JSON file, return the resulting data'
-    fd = open(filename, "r")
-    data = json.load(fd)
-    fd.close()
-    return data
-
-temp_dir  = "''' + temp_dir       + '''"     # Houdini tempdir for this job
-frame_fmt = "''' + self.frame_fmt + '''"     # Rush frame format, e.g. "%04d"
-
-# If env var not set and no frame specified on cmd line? fail
-if "RUSH_FRAME" not in os.environ and len(sys.argv) <= 1:
-    print("ERROR: RUSH_FRAME env var is unset and no frame parameter specified")
-    sys.exit(1)
-
-# Rush frame#
-if len(sys.argv) > 1: framepad = frame_fmt % int(sys.argv[1])
-else:                 framepad = frame_fmt % int(os.environ["RUSH_FRAME"])
-
-# Load JSON file for this frame / workitem
-jsonfile = temp_dir + "/rush-%s.json" % framepad
-print("--- Loading json frame %s: %s" % (framepad, jsonfile))
-workitem_data = LoadJSON(jsonfile)
-print("    workitem name: %s\\n" % workitem_data["workitem_name"])
-
-# Merge current environment with vars from workitem
-job_env = os.environ.copy()
-job_env.update(workitem_data["job_env"])	# merge
-
-# Execute the houdini workitem command
-print("Executing: %s" % workitem_data["command"])
-sys.stdout.flush()
-sys.stderr.flush()
-exitcode = subprocess.call(workitem_data["command"], shell=True, env=job_env)
-
-# Check for success
-if exitcode != 0:
-    print("FAILED (Exit code %d)" % exitcode)
-    sys.exit(1)		# tell rush we failed
-
-print("SUCCEEDS")
-sys.exit(0)		# tell rush we succeeded
-''')
-        fd.flush()
-        fd.close()
-        os.sync()
-        os.chmod(filename, 0o775)    # all read/exec, user/grp write
-
     def SubmitJob(self, submitinfo):
         '''
         Submit rush job.
@@ -133,8 +73,10 @@ sys.exit(0)		# tell rush we succeeded
 
         Returns jobid, or throws an exception on error.
         '''
-        print("DEBUG: SubmitJob(): submitinfo:\n---\n%s---\n" % submitinfo)
+        print("DEBUG: SubmitJob(): submitinfo:\n---\n%s---" % submitinfo)
+        # TODO: Handle submitting job here
         #DEBUG raise RushException("could not submit job: TESTING")
+        return "xxx"
 
     def QueueWorkItem(self, workitem_data):
         # TODO:
@@ -188,8 +130,10 @@ sys.exit(0)		# tell rush we succeeded
         # work_item     -  The pdg.WorkItem to schedule
 
         print("--- onSchedule [%s]" % self.sched_name)
+
+        rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
         print("      workitem.id: %d" % work_item.id)
-        print("       rush frame: %04d" % work_item.id)
+        print("       rush frame: %s" % rushframepad)
         print("    workitem.name: %s" % work_item.name)
 
         # Ensure directories exist and serialize the work item
@@ -238,8 +182,7 @@ sys.exit(0)		# tell rush we succeeded
                           "workitem_name": work_item.name,
                         }
 
-        frame_str = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
-        json_filename = "%s/rush-%s.json" % (temp_dir, frame_str)
+        json_filename = "%s/rush-%s.json" % (temp_dir, rushframepad)
         try:
             self.SaveJSON(json_filename, workitem_data)
             print("    Wrote json file: %s" % json_filename)
@@ -366,6 +309,66 @@ sys.exit(0)		# tell rush we succeeded
         # sharedserver_name  -  shared server name
 
         return True
+
+    def SaveRenderScript(self, filename, python_cmd, temp_dir):
+        '''
+        Create the rush render script that loads the json file and runs
+        the houdini work item.
+        '''
+        fd = open(filename, "w")
+        # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
+        fd.write('#!' + python_cmd + '''
+import os,sys,json,subprocess
+
+# Rush render script for rushscheduler generated work items
+
+def LoadJSON(filename):
+    'Load a JSON file, return the resulting data'
+    fd = open(filename, "r")
+    data = json.load(fd)
+    fd.close()
+    return data
+
+temp_dir  = "''' + temp_dir       + '''"     # Houdini tempdir for this job
+frame_fmt = "''' + self.frame_fmt + '''"     # Rush frame format, e.g. "%04d"
+
+# If env var not set and no frame specified on cmd line? fail
+if "RUSH_FRAME" not in os.environ and len(sys.argv) <= 1:
+    print("ERROR: RUSH_FRAME env var is unset and no frame parameter specified")
+    sys.exit(1)
+
+# Rush frame#
+if len(sys.argv) > 1: framepad = frame_fmt % int(sys.argv[1])
+else:                 framepad = frame_fmt % int(os.environ["RUSH_FRAME"])
+
+# Load JSON file for this frame / workitem
+jsonfile = temp_dir + "/rush-%s.json" % framepad
+print("--- rush-render: Loading json frame %s: %s" % (framepad, jsonfile))
+workitem_data = LoadJSON(jsonfile)
+print("--- rush-render: workitem name: %s" % workitem_data["workitem_name"])
+
+# Merge current environment with vars from workitem
+job_env = os.environ.copy()
+job_env.update(workitem_data["job_env"])	# merge
+
+# Execute the houdini workitem command
+print("--- rush-render: Executing: %s" % workitem_data["command"])
+sys.stdout.flush()
+sys.stderr.flush()
+exitcode = subprocess.call(workitem_data["command"], shell=True, env=job_env)
+
+# Check for success
+if exitcode != 0:
+    print("--- rush-render: FAILED (Exit code %d)" % exitcode)
+    sys.exit(1)		# tell rush we failed
+
+print("--- rush-render: SUCCEEDS")
+sys.exit(0)		# tell rush we succeeded
+''')
+        fd.flush()
+        fd.close()
+        os.sync()
+        os.chmod(filename, 0o775)    # all read/exec, user/grp write
 
     def applicationBin(self, name, work_item):
         if name == 'python':
