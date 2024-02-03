@@ -71,7 +71,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd.close()
         return out
 
-    def SubmitJob(self, submitinfo_str, temp_dir):
+    def SubmitJob(self, submitinfo_str, job_temp_dir):
         '''
         Submit rush job.
         'submitinfo_str' is a multiline string containing 'rush -submit' commands.  At minimum:
@@ -94,13 +94,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("DEBUG: SubmitJob(): submitinfo:\n---\n%s---" % submitinfo_str)
 
         # Save submitinfo to a file
-        submitinfo_file = temp_dir + "/submit"
+        submitinfo_file = job_temp_dir + "/submit"
         fd = open(submitinfo_file, "w")
         fd.write(submitinfo_str)
         fd.close()
         # Submit job
-        out = temp_dir + "/submit.out"
-        err = temp_dir + "/submit.err"
+        out = job_temp_dir + "/submit.out"
+        err = job_temp_dir + "/submit.err"
         cmd = ("rush -submit "
               + " < "  + submitinfo_file
               + " 2> " + err
@@ -167,10 +167,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         print("--- onSchedule [%s]" % self.sched_name)
 
-        rushframepad = self.frame_fmt % int(workitem.id)    # e.g. 1 -> "00001"
-        print("      workitem.id: %d" % workitem.id)
-        print("       rush frame: %s" % rushframepad)
-        print("    workitem.name: %s" % workitem.name)
+        workitem_temp_dir = str(self.tempDir(False))
+        rushframepad      = self.frame_fmt % int(workitem.id)    # e.g. 1 -> "00001"
+
+        print("         workitem.id: %d" % workitem.id)
+        print("          rush frame: %s" % rushframepad)
+        print("       workitem.name: %s" % workitem.name)
+        print("    workitem.tempdir: %s" % workitem_temp_dir)
 
         # Ensure directories exist and serialize the work item
         self.createJobDirsAndSerializeWorkItems(workitem)
@@ -181,22 +184,25 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # No job submitted yet? submit one
         if self.job["jobid"] == None:
             # Create a new tempdir for this workitem
-            self.temp_dir = str(self.tempDir(False)) + "/" + workitem.name
-            os.mkdir(self.temp_dir)
+            self.job["jobdir"] = workitem_temp_dir + "/" + workitem.name
+            os.mkdir(self.job["jobdir"])
             # Expand python command based on workitem's PDG_PYTHON variable
             python_cmd = self.expandCommandTokens("__PDG_PYTHON__", workitem)
             # Create render script
-            renderscript_filename = self.temp_dir + "/rush-render.py"
+            renderscript_filename = self.job["jobdir"] + "/rush-render.py"
             print("    Writing render script: %s" % renderscript_filename)
-            self.SaveRenderScript(renderscript_filename, python_cmd, self.temp_dir)
+            self.SaveRenderScript(renderscript_filename,
+                                  python_cmd,
+                                  self.job["jobdir"],
+                                  workitem_temp_dir)
             # Create logdir
-            self.job["logdir"] = self.temp_dir + "/logs"
+            self.job["logdir"] = self.job["jobdir"] + "/logs"
             print("    Creating logdir: %s" % self.job["logdir"])
             os.mkdir(self.job["logdir"], 0o777)
             # Create submitinfo
             # TODO: Build job submitinfo
-            job_title  = "HOUDINI_PDG:" + workitem.name + "/" + self.sched_name
-            job_cpus   = "linuxbox99=1"                 # TODO
+            job_title  = "HOUDINI:" + workitem.name + "/" + self.sched_name
+            job_cpus   = "iron=1"                 # TODO
             submitinfo = ("title   %s\n"    % job_title
                          +"cpus    %s\n"    % job_cpus
                          +"command %s %s\n" % (python_cmd, renderscript_filename)
@@ -207,11 +213,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             # TODO: Should we trap exceptions and pop dialog ourself,
             #       or let houdini handle raw exception itself? The latter for now..
             #
-            # TODO: > Better title (HOUDINI_PDG: <schd_name, workitem_name>)
-            #       > logdir (tempdir/logs)
-            #
             print("--- Starting rush job: %s" % job_title)
-            (jobid, msg) = self.SubmitJob(submitinfo, self.temp_dir)
+            (jobid, msg) = self.SubmitJob(submitinfo, self.job["jobdir"])
             print(msg)          # show results of submit to stdout, regardless
             if jobid == "":
                 print("ERROR: 'rush -submit' failed:\n%s" % msg)
@@ -226,7 +229,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                                 "PDG_ITEM_NAME":     str(workitem.name),
                                 "PDG_ITEM_ID":       str(workitem.id),
                                 "PDG_DIR":           str(self.workingDir(False)),
-                                "PDG_TEMP":          str(self.temp_dir),
+                                "PDG_TEMP":          str(workitem_temp_dir),
                                 "PDG_SCRIPTDIR":     str(self.scriptDir(False))
                             },
                           "command":       item_command,
@@ -235,7 +238,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                           "workitem_name": workitem.name,
                         }
 
-        json_filename = "%s/rush-%s.json" % (self.temp_dir, rushframepad)
+        json_filename = "%s/rush-%s.json" % (self.job["jobdir"], rushframepad)
         try:
             self.SaveJSON(json_filename, workitem_data)
             print("    Wrote json file: %s" % json_filename)
@@ -364,7 +367,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         return True
 
-    def SaveRenderScript(self, filename, python_cmd, temp_dir):
+    def SaveRenderScript(self, filename, python_cmd, job_temp_dir, workitem_temp_dir):
         '''
         Create the rush render script that loads the json file and runs
         the houdini work item.
@@ -383,8 +386,9 @@ def LoadJSON(filename):
     fd.close()
     return data
 
-temp_dir  = "''' + temp_dir       + '''"     # Houdini tempdir for this job
-frame_fmt = "''' + self.frame_fmt + '''"     # Rush frame format, e.g. "%04d"
+workitem_temp_dir  = "''' + workitem_temp_dir + '''"   # Houdini tempdir for this job
+job_temp_dir       = "''' + job_temp_dir      + '''"   # Rush job temp dir
+frame_fmt          = "''' + self.frame_fmt    + '''"   # Rush frame format, e.g. "%04d"
 
 # If env var not set and no frame specified on cmd line? fail
 if "RUSH_FRAME" not in os.environ and len(sys.argv) <= 1:
@@ -396,7 +400,7 @@ if len(sys.argv) > 1: framepad = frame_fmt % int(sys.argv[1])
 else:                 framepad = frame_fmt % int(os.environ["RUSH_FRAME"])
 
 # Load JSON file for this frame / workitem
-jsonfile = temp_dir + "/rush-%s.json" % framepad
+jsonfile = job_temp_dir + "/rush-%s.json" % framepad
 print("--- rush-render: Loading json frame %s: %s" % (framepad, jsonfile))
 workitem_data = LoadJSON(jsonfile)
 print("--- rush-render: workitem name: %s" % workitem_data["workitem_name"])
