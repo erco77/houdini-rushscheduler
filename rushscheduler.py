@@ -11,32 +11,16 @@ import pdg
 from pdg.scheduler import PyScheduler
 from pdg.job.callbackserver import CallbackServerMixin
 
-def SaveJSON(filename, data):
-    '''
-    Save json data to 'filename'
-    May raise IOError exceptions on file errors.
-    '''
-    fd = open(filename, "w")
-    fd.write(json.dumps(data,sort_keys=True, indent=4))
-    fd.close()
-
-def LoadJSON(filename):
-    '''
-    Load json data from 'filename', returns data on success.
-    May raise IOError exceptions on file errors.
-    Returns data loaded from json file.
-    '''
-    fd   = open(filename, "r")
-    data = json.load(fd)
-    fd.close()
-    return data
+class RushException(Exception):
+    pass
 
 class RushScheduler(CallbackServerMixin, PyScheduler):
     """
     Rush scheduler implementation
     """
-    jobs = {}                     # job data instance (indexed by rushsched name)
+    job = {}                     # job data
     sched_name = None
+    frame_fmt  = "%05d"          # frame padding format char TODO: Load from rush.conf!
 
     def __init__(self, scheduler, name):
         """
@@ -44,7 +28,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         Initializes the Scheduler with a C++ scheduler reference and name
         """
-        print("-- INIT:")
+        print("-- INIT: [%s]" % name)
         PyScheduler.__init__(self, scheduler, name)
         CallbackServerMixin.__init__(self, True)
         self.sched_name = name            # save our instance name for later
@@ -53,11 +37,112 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     def templateName(cls):
         return "python_scheduler"
 
+    def SaveJSON(self, filename, data):
+        '''
+        Save json data to 'filename'
+        May raise IOError exceptions on file errors.
+        '''
+        fd = open(filename, "w")
+        fd.write(json.dumps(data,sort_keys=True, indent=4))
+        fd.flush()      # (nfs) flush write
+        fd.close()
+        os.sync()       # (nfs) ensure flush dirty buffers to nodes
+
+    def LoadJSON(self, filename):
+        '''
+        Load json data from 'filename', returns data on success.
+        May raise IOError exceptions on file errors.
+        Returns data loaded from json file.
+        '''
+        fd   = open(filename, "r")
+        data = json.load(fd)
+        fd.close()
+        return data
+
+    def SaveRenderScript(self, filename, python_cmd, temp_dir):
+        '''
+        Create the rush render script that loads the json file and runs
+        the houdini work item.
+        '''
+        fd = open(filename, "w")
+        # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
+        fd.write('#!' + python_cmd + '''
+import os,sys,json,subprocess
+
+# Rush render script for rushscheduler generated work items
+
+def LoadJSON(filename):
+    'Load a JSON file, return the resulting data'
+    fd = open(filename, "r")
+    data = json.load(fd)
+    fd.close()
+    return data
+
+temp_dir  = "''' + temp_dir       + '''"     # Houdini tempdir for this job
+frame_fmt = "''' + self.frame_fmt + '''"     # Rush frame format, e.g. "%04d"
+
+# If env var not set and no frame specified on cmd line? fail
+if "RUSH_FRAME" not in os.environ and len(sys.argv) <= 1:
+    print("ERROR: RUSH_FRAME env var is unset and no frame parameter specified")
+    sys.exit(1)
+
+# Rush frame#
+if len(sys.argv) > 1: framepad = frame_fmt % int(sys.argv[1])
+else:                 framepad = frame_fmt % int(os.environ["RUSH_FRAME"])
+
+# Load JSON file for this frame / workitem
+jsonfile = temp_dir + "/rush-%s.json" % framepad
+print("--- Loading json frame %s: %s" % (framepad, jsonfile))
+workitem_data = LoadJSON(jsonfile)
+print("    workitem name: %s\\n" % workitem_data["workitem_name"])
+
+# Merge current environment with vars from workitem
+job_env = os.environ.copy()
+job_env.update(workitem_data["job_env"])	# merge
+
+# Execute the houdini workitem command
+print("Executing: %s" % workitem_data["command"])
+sys.stdout.flush()
+sys.stderr.flush()
+exitcode = subprocess.call(workitem_data["command"], shell=True, env=job_env)
+
+# Check for success
+if exitcode != 0:
+    print("FAILED (Exit code %d)" % exitcode)
+    sys.exit(1)		# tell rush we failed
+
+print("SUCCEEDS")
+sys.exit(0)		# tell rush we succeeded
+''')
+        fd.flush()
+        fd.close()
+        os.sync()
+        os.chmod(filename, 0o775)    # all read/exec, user/grp write
+
+    def SubmitJob(self, submitinfo):
+        '''
+        Submit rush job.
+        'submitinfo' is a multiline string containing 'rush -submit' commands.  At minimum:
+
+            title foo
+            cpus +any=1
+            command some_command
+
+        It's OK to leave 'frames' unspecified; they can be added later. See docs for info:
+        https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Submit%20Command%20Reference
+
+        Returns jobid, or throws an exception on error.
+        '''
+        print("DEBUG: SubmitJob(): submitinfo:\n---\n%s---\n" % submitinfo)
+        #DEBUG raise RushException("could not submit job: TESTING")
+
     def QueueWorkItem(self, workitem_data):
-        # TBD:
+        # TODO:
         #    1) thread lock
-        #    2) add to self.jobs[]
+        #    2) add work item to self.job
         #    3) unlock
+        #
+        # Thread will take care of adding the frame every 5 secs or some such.
         #
         # If rush job and child thread isn't started, start them!
         # Or if parent should do this, check if it did and fail if not.
@@ -78,15 +163,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("--- onStartCook [%s]" % self.sched_name)
 
         # New scheduler?
-        name = self.sched_name
-        if name not in self.jobs:
-            self.jobs[name] = {}     # new dict for this scheduler
 
         # Reset this scheduler's dict
-        self.jobs[name]["lock"]       = threading.Semaphore()
-        self.jobs[name]["child_id"]   = None
-        self.jobs[name]["jobid"]      = None
-        self.jobs[name]["work_items"] = []
+        self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
+        self.job["child_id"]   = None                   # child thread id
+        self.job["jobid"]      = None                   # current rush jobid for workitems
+        self.job["rush_frames"] = []                    # cache of rush frames to be added to job by child thread
 
         wd = self["pdg_workingdir"].evaluateString()
         self.setWorkingDir(wd, wd)
@@ -117,7 +199,28 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         item_command = self.expandCommandTokens(work_item.command, work_item)
 
         # add special PDG_* variables to the job's environment
-        temp_dir = str(self.tempDir(False))
+        temp_dir   = str(self.tempDir(False))
+        python_cmd = self.expandCommandTokens("__PDG_PYTHON__", work_item)
+        renderscript_filename = temp_dir + "/rush-render.py"
+
+        # No job submitted yet? submit one
+        if self.job["jobid"] == None:
+            # Write the render script
+            self.SaveRenderScript(renderscript_filename, python_cmd, temp_dir)
+            print("    Wrote render script: %s" % renderscript_filename)
+            # TODO: Build job submitinfo
+            job_title   = "testing"       # TODO
+            job_cpus    = "linuxbox99=1"  # TODO
+            submitinfo = ("title   %s\n" % job_title +
+                          "cpus    %s\n" % job_cpus  +
+                          "command %s %s\n" % (python_cmd, renderscript_filename))
+            # SUBMIT RUSH JOB
+            #
+            # TODO: Not sure if we should trap exceptions and pop a dialog,
+            #       or simply let houdini handle it as an error in the gui.
+            #       The latter for now..
+            #
+            self.job["jobid"] = self.SubmitJob(submitinfo)      # let houdini trap exceptions
 
         # Put all workitem data into a dict we can save as a json object
         workitem_data = { "job_env":
@@ -129,20 +232,20 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                                 "PDG_TEMP":          temp_dir,
                                 "PDG_SCRIPTDIR":     str(self.scriptDir(False))
                             },
-                          "command": item_command,
-                          "rush_frame": "%04d" % work_item.id,
-                          "sched_name": self.sched_name,
-                          "workitem_name": work_item.name
+                          "command":       item_command,
+                          "rush_frame":    "%05d" % work_item.id,
+                          "sched_name":    self.sched_name,
+                          "workitem_name": work_item.name,
                         }
 
-        json_filename = "%s/rush-%04d.json" % (temp_dir, work_item.id)
+        frame_str = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
+        json_filename = "%s/rush-%s.json" % (temp_dir, frame_str)
         try:
-            SaveJSON(json_filename, workitem_data)
+            self.SaveJSON(json_filename, workitem_data)
+            print("    Wrote json file: %s" % json_filename)
         except IOError as e:
             print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
             return pdg.scheduleResult.CookFailed
-
-        print("    Wrote json file: %s" % json_filename)
 
         self.QueueWorkItem(workitem_data)
 
@@ -186,6 +289,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return
 
     def onStart(self):
+        # Custom onStartCook logic. Returns True if started.
+        #
         # Custom onStartCook logic. Returns True if started.
         #
         # The following variables are available:
