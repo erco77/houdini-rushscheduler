@@ -190,9 +190,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             print("    Writing render script: %s" % renderscript_filename)
             self.SaveRenderScript(renderscript_filename, python_cmd, self.temp_dir)
             # Create logdir
-            job_logdir = self.temp_dir + "/logs"
-            print("    Creating logdir: %s" % job_logdir)
-            os.mkdir(job_logdir, 0o777)
+            self.job["logdir"] = self.temp_dir + "/logs"
+            print("    Creating logdir: %s" % self.job["logdir"])
+            os.mkdir(self.job["logdir"], 0o777)
             # Create submitinfo
             # TODO: Build job submitinfo
             job_title  = "HOUDINI_PDG:" + workitem.name + "/" + self.sched_name
@@ -200,7 +200,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             submitinfo = ("title   %s\n"    % job_title
                          +"cpus    %s\n"    % job_cpus
                          +"command %s %s\n" % (python_cmd, renderscript_filename)
-                         +"logdir  %s\n"    % job_logdir
+                         +"logdir  %s\n"    % self.job["logdir"]
                          )
             # SUBMIT RUSH JOB
             #
