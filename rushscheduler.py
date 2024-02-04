@@ -493,6 +493,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             rushframe = work_id
             status    = self.GetStatus(rushframe)
             print("%d) %s" % (work_id, status))
+            if   status == "Que":  pass
+            elif status == "Run":  self.workItemStartCook(work_id, index=-1)                   # TODO: index=-1?
+            elif status == "Done": self.workItemSucceeded(work_id, index=-1, cook_duration=0)  # TODO: index=-1?, cook_duration?
+            elif status == "Fail": self.workItemFailed(work_id,    index=-1)                   # TODO: index=-1?
 
         return tickResult.SchedulerReady
 
