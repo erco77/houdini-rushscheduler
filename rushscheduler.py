@@ -361,6 +361,24 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #
         # The following variables are available:
         # self          -  A reference to the current pdg.Scheduler instance
+
+        # ERCO: May need:
+        #       with attrib_owner.lockAttributes():
+        #            attrib_owner.setIntAttrib("example", 10)
+        #       See: 
+        #           [1] https://www.sidefx.com/docs/houdini/tops/schedulers_callbacks.html
+        #           [2] https://www.sidefx.com/docs/houdini/tops/pdg/WorkItem.html#lockAttributes
+        #
+        #       From [1]:
+        #        ------------------------------------------------------------------------------------------
+        #        >> Warning
+        #        >>     The only callback that can safely write work item attributes is onSchedule.
+        #        >>     If you want to add attributes to a work item in the onTick callback,
+        #        >>     you need to use the pdg.WorkItem.lockAttributes in order to safely modify the work item.
+        #        >>     Additionally, your scheduler node should only keep references to work items
+        #        >>     that are actively running. Once your scheduler notifies PDG that a work item
+        #        >>     has succeeded or failed, it should no longer hold a reference to that work item.
+        #        ------------------------------------------------------------------------------------------
         from pdg import tickResult
 
         print("--- onTick")
