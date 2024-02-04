@@ -9,7 +9,7 @@
 #
 # Workitem Files:
 #     temp_dir/<work_item_name>/json/<rush_frame#>.json  - rush frame json files (contains env settings and work_item command)
-#     temp_dir/<work_item_name>/status/<rush_frame#>.txt - rush frame status files (contains "start", "fail", "success")
+#     temp_dir/<work_item_name>/status/<rush_frame#>.txt - rush frame status files ("Que", "Run", "Done", "Fail")
 #     temp_dir/<work_item_name>/logs/<rush_frame#>       - rush frame log files - stdout/stderr from renderer
 #
 
@@ -125,11 +125,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     def StatusFilename(self, frame):
         '''
         Returns the filename of a rush frame's status file.
-        Status files are created when a frame starts rendering,
-        and is updated with single word status info:
-             "start"   -- frame started rendering
-             "fail"    -- frame failed
-             "success" -- frame succeeded
+        Status files are updated while frame is rendering:
+             "Run"   -- frame is running
+             "Done"" -- frame succeeded
+             "Fail"  -- frame failed
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1/status/0005.txt
                  -------------------------------------------- ------ --------
@@ -139,7 +138,15 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                                                                |
                                                                status directory
         '''
-        return self.JobDirectory() + "/status/" + self.frame_fmt % frame + ".txt"
+        return self.JobDirectory() + "/status/" + (self.frame_fmt % frame) + ".txt"
+
+    def GetStatus(self, frame):
+        statusfile = self.StatusFilename(frame)
+        if not os.path.exists(statusfile): return "Que"
+        fd = open(statusfile, "r")
+        status = fd.read()
+        fd.close()
+        return status
 
     def JSONDirname(self):
         return self.JobDirectory() + "/json"
@@ -471,23 +478,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # The following variables are available:
         # self          -  A reference to the current pdg.Scheduler instance
 
-        # ERCO: May need:
-        #       with attrib_owner.lockAttributes():
-        #            attrib_owner.setIntAttrib("example", 10)
-        #       See: 
-        #           [1] https://www.sidefx.com/docs/houdini/tops/schedulers_callbacks.html
-        #           [2] https://www.sidefx.com/docs/houdini/tops/pdg/WorkItem.html#lockAttributes
-        #
-        #       From [1]:
-        #        ------------------------------------------------------------------------------------------
-        #        >> Warning
-        #        >>     The only callback that can safely write work item attributes is onSchedule.
-        #        >>     If you want to add attributes to a work item in the onTick callback,
-        #        >>     you need to use the pdg.WorkItem.lockAttributes in order to safely modify the work item.
-        #        >>     Additionally, your scheduler node should only keep references to work items
-        #        >>     that are actively running. Once your scheduler notifies PDG that a work item
-        #        >>     has succeeded or failed, it should no longer hold a reference to that work item.
-        #        ------------------------------------------------------------------------------------------
         from pdg import tickResult
 
         print("--- onTick")
@@ -500,9 +490,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #        workItemSuccess(id)   - Reports that the specified work item has succeeded. 
         #
         for work_id in self.work_item_ids:
-            print("%d)" % work_id)
-            # framepad = self.frame_fmt % run_item.id
-            # statusfile = 
+            rushframe = work_id
+            status    = self.GetStatus(rushframe)
+            print("%d) %s" % (work_id, status))
 
         return tickResult.SchedulerReady
 
@@ -561,8 +551,8 @@ def LoadJSON(filename):
 
 def UpdateStatus(filename, status):
     """
-    Write out status to a file that onTick() can check.
-    Status: "started", "success", "fail"
+    Write out rush status to a file that onTick() can get with self.GetStatus(frame).
+    Status: "Run", "Done", "Fail"
     """
     tmpfilename = filename + ".tmp"
     fd = open(tmpfilename, "w")
@@ -587,22 +577,23 @@ status_dir   = job_temp_dir + "/status"
 status_file  = status_dir + "/" + framepad + ".txt"
 if not os.path.isdir(status_dir):
     # Create status dir if it doesn't exist
-    print("--- rush-render: Creating status dir: %s" % status_file)
+    print("--- rush-render:  Creating status dir: %s" % status_file)
     os.mkdir(status_dir, 0o777)
 print("--- rush-render: Creating status file: %s" % status_file)
-UpdateStatus(status_file, "started")        # tell onTick() we've started
+UpdateStatus(status_file, "Run")            # tell onTick() we're running
 
 # Load JSON file for this frame / work_item
 jsonfile = job_temp_dir + "/json/%s.json" % framepad
-print("--- rush-render: Loading json file: %s" % jsonfile)
+print("--- rush-render:    Loading json file: %s" % jsonfile)
 work_item_data = LoadJSON(jsonfile)
-print("--- rush-render: work_item name: %s" % work_item_data["work_item_name"])
+print("--- rush-render:       work_item name: %s" % work_item_data["work_item_name"])
 
 # Merge current environment with vars from work_item
 job_env = os.environ.copy()
 job_env.update(work_item_data["job_env"])	# merge
 
 # Execute the houdini work_item command
+print("")
 print("--- rush-render: Executing: %s" % work_item_data["command"])
 sys.stdout.flush()
 sys.stderr.flush()
@@ -611,11 +602,11 @@ exitcode = subprocess.call(work_item_data["command"], shell=True, env=job_env)
 # Check for success
 if exitcode != 0:
     print("--- rush-render: FAILED (Exit code %d)" % exitcode)
-    UpdateStatus(status_file, "fail")       # tell onTick() we failed
+    UpdateStatus(status_file, "Fail")       # tell onTick() we failed
     sys.exit(1)		                        # tell rush we failed
 
 print("--- rush-render: SUCCEEDS")
-UpdateStatus(status_file, "success")        # tell onTick() we succeeded
+UpdateStatus(status_file, "Done")           # tell onTick() we succeeded
 sys.exit(0)		                            # tell rush we succeeded
 ''')
         fd.flush()
