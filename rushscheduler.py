@@ -36,6 +36,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     sched_name    = None         # set on class init
     frame_fmt     = "%05d"       # frame padding format char TODO: Load from rush.conf on init!
     work_item_ids = []           # list of scheduled work_item id's
+    autodump      = False        # if true, we automatically dump jobs
 
     def __init__(self, scheduler, name):
         """
@@ -177,6 +178,28 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                  houdini temp dir
         '''
         return self.JSONDirname() + "/" + (self.frame_fmt % frame) + ".json"
+
+    def RushJobid(self):
+        '''
+        Return the current rush jobid, or None if no job is running.
+        '''
+        return self.job["jobid"]
+
+    def DumpRushJob(self):
+        '''
+        Dump the current rush job, if any
+        '''
+        if self.RushJobid() != None:
+            os.system("rush -dump " + self.RushJobid())
+
+    def StopRushJob(self):
+        '''
+        Pause the rush job, and change all Run frames to Que.
+        Does not dump, so user can inspect the job.
+        '''
+        if self.RushJobid() != None:
+            os.system("rush -pause "   + self.RushJobid())
+            os.system("rush -que Run " + self.RushJobid())
 
     def SubmitJob(self, submitinfo_str, job_temp_dir):
         '''
@@ -462,11 +485,19 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def onStopCook(self, cancel):
         # Custom onStopCook logic. Returns True if stopped.
+        # ERCO: Called on regular completion, or if Task "Cancel" button is hit.
         #
         # The following variables are available:
         # self          -  A reference to the current pdg.Scheduler instance
         # cancel        -  True if cook was cancelled
-        print("--- onStopCook")
+        
+        if cancel: print("--- onStopCook [cancel? YES]")
+        else:      print("--- onStopCook [cancel? no]")
+
+        # User cancelled cooking? Dump the rush job
+        if cancel:
+            if self.autodump: self.DumpRushJob()        # cancel + autodump==true? dump job
+            else:             self.StopRushJob()        # cancel + autodump==false? stop job (leave queued)
 
         return True
 
@@ -492,11 +523,19 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         for work_id in self.work_item_ids:
             rushframe = work_id
             status    = self.GetStatus(rushframe)
-            print("%d) %s" % (work_id, status))
+            # print("%d) %s" % (work_id, status))
+            c = '?'
+            if   status == "Que":  c = u"."
+            elif status == "Run":  c = u"⬤"
+            elif status == "Done": c = u"✔"
+            elif status == "Fail": c = u"X"
+            sys.stdout.write(c)
+
             if   status == "Que":  pass
             elif status == "Run":  self.workItemStartCook(work_id, index=-1)                   # TODO: index=-1?
             elif status == "Done": self.workItemSucceeded(work_id, index=-1, cook_duration=0)  # TODO: index=-1?, cook_duration?
             elif status == "Fail": self.workItemFailed(work_id,    index=-1)                   # TODO: index=-1?
+        print("")
 
         return tickResult.SchedulerReady
 
