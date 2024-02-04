@@ -142,3 +142,10 @@ Notes for when writing onTick() code:
         #        >>     that are actively running. Once your scheduler notifies PDG that a work item
         #        >>     has succeeded or failed, it should no longer hold a reference to that work item.
         #        ------------------------------------------------------------------------------------------
+
+----
+# if not os.path.isdir(status_dir):
+#     # Create status dir if it doesn't exist
+#     print("--- rush-render:  Creating status dir: %s" % status_file)
+#     try: os.mkdir(status_dir, 0o777)    # might fail if another render did it already
+#     except: pass                        # ignore on fail

@@ -123,6 +123,14 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         '''
         return self.JobDirectory() + "/logs"
 
+    def StatusDirectory(self):
+        '''
+        Returns the filename of the rush frame status directory.
+        This directory contains status files our rush render script
+        updates for onTick() to get progress during rendering.
+        '''
+        return self.JobDirectory() + "/status"
+
     def StatusFilename(self, frame):
         '''
         Returns the filename of a rush frame's status file.
@@ -132,14 +140,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
              "Fail"  -- frame failed
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1/status/0005.txt
-                 -------------------------------------------- ------ --------
-                 |                                             |      |
-                 Job temp dir                                  |      status filename.
-                                                               |      One per rush-frame.
-                                                               |
-                                                               status directory
+                 --------------------------------------------------- --------
+                 |                                                    |
+                 Status directory                                     status filename.
+                                                                      One per rush-frame.
         '''
-        return self.JobDirectory() + "/status/" + (self.frame_fmt % frame) + ".txt"
+        return self.StatusDirectory() + "/" + (self.frame_fmt % frame) + ".txt"
 
     def GetStatus(self, frame):
         statusfile = self.StatusFilename(frame)
@@ -262,10 +268,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("      Creating rush logdir: %s" % self.LogDirectory())
         if not os.path.isdir(self.LogDirectory()):
             os.mkdir(self.LogDirectory(), 0o777)
+        # Create status dir
+        print("       Creating status dir: %s" % self.StatusDirectory())
+        if not os.path.isdir(self.StatusDirectory()):
+            os.mkdir(self.StatusDirectory(), 0o777)
         # Create submitinfo
-        # TODO: Build job submitinfo
         job_title  = "HOUDINI:" + work_item.name + "/" + self.sched_name
-        job_cpus   = "iron=1"                 # TODO
+        job_cpus   = "iron=2 radon=2"                 # TODO - should come from Jon's UI
         submitinfo = ("title   %s\n"    % job_title
                      +"cpus    %s\n"    % job_cpus
                      +"command %s %s\n" % (python_cmd, renderscript_filename)
@@ -579,7 +588,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd = open(filename, "w")
         # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
         fd.write('#!' + python_cmd + '''
-import os,sys,json,subprocess
+import os,sys,json,time,subprocess
 
 # Rush render script for rushscheduler generated work items
 
@@ -603,6 +612,10 @@ def UpdateStatus(filename, status):
     fd.close()
     os.rename(tmpfilename, filename)
 
+def Message(msg):
+    sys.stdout.write("--- render-script: %s\\n" % msg)
+    sys.stdout.flush()
+
 job_temp_dir = "''' + job_temp_dir      + '''"   # Rush job temp dir
 frame_fmt    = "''' + self.frame_fmt    + '''"   # Rush frame format, e.g. "%04d"
 
@@ -616,20 +629,22 @@ if len(sys.argv) > 1: framepad = frame_fmt % int(sys.argv[1])
 else:                 framepad = frame_fmt % int(os.environ["RUSH_FRAME"])
 
 # Status file
-status_dir   = job_temp_dir + "/status"
-status_file  = status_dir + "/" + framepad + ".txt"
-if not os.path.isdir(status_dir):
-    # Create status dir if it doesn't exist
-    print("--- rush-render:  Creating status dir: %s" % status_file)
-    os.mkdir(status_dir, 0o777)
-print("--- rush-render: Creating status file: %s" % status_file)
+status_dir  = job_temp_dir + "/status"
+status_file = status_dir + "/" + framepad + ".txt"
+while not os.path.isdir(status_dir):
+    Message("Waiting for status dir to exist (3sec retries)")
+    time.sleep(3)
+Message("Creating status file: %s" % status_file)
 UpdateStatus(status_file, "Run")            # tell onTick() we're running
 
 # Load JSON file for this frame / work_item
 jsonfile = job_temp_dir + "/json/%s.json" % framepad
-print("--- rush-render:    Loading json file: %s" % jsonfile)
+Message("    Loading json file: %s" % jsonfile)
+while not os.path.exists(jsonfile):
+    Message("Waiting for json file to exist (3sec retries)")
+    time.sleep(3)
 work_item_data = LoadJSON(jsonfile)
-print("--- rush-render:       work_item name: %s" % work_item_data["work_item_name"])
+Message("       work_item name: %s" % work_item_data["work_item_name"])
 
 # Merge current environment with vars from work_item
 job_env = os.environ.copy()
@@ -637,18 +652,18 @@ job_env.update(work_item_data["job_env"])	# merge
 
 # Execute the houdini work_item command
 print("")
-print("--- rush-render: Executing: %s" % work_item_data["command"])
+Message("Executing: %s" % work_item_data["command"])
 sys.stdout.flush()
 sys.stderr.flush()
 exitcode = subprocess.call(work_item_data["command"], shell=True, env=job_env)
 
 # Check for success
 if exitcode != 0:
-    print("--- rush-render: FAILED (Exit code %d)" % exitcode)
+    Message("FAILED (Exit code %d)" % exitcode)
     UpdateStatus(status_file, "Fail")       # tell onTick() we failed
     sys.exit(1)		                        # tell rush we failed
 
-print("--- rush-render: SUCCEEDS")
+Message("SUCCEEDS")
 UpdateStatus(status_file, "Done")           # tell onTick() we succeeded
 sys.exit(0)		                            # tell rush we succeeded
 ''')
