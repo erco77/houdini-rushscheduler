@@ -39,6 +39,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     def templateName(cls):
         return "python_scheduler"
 
+# TODO: Are we supposed to define this?
+#   def workItemResultServerAddr(self):
+#       return None
+
     def SaveJSON(self, filename, data):
         '''
         Save json data to 'filename'
@@ -114,33 +118,113 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         jobid = r.groups()[0]               # Success?
         return (jobid, msg)
 
-    def QueueWorkItem(self, workitem_data):
+    def StartWorkItemJob(self, workitem):
+        '''
+        Start job to manage workitems
+        '''
+        # Create a new tempdir for this workitem
+        self.job["jobdir"] = self.tempDir(False) + "/" + workitem.name
+        os.mkdir(self.job["jobdir"])
+        # Expand python command based on workitem's PDG_PYTHON variable
+        python_cmd = self.expandCommandTokens("__PDG_PYTHON__", workitem)
+        # Create render script
+        renderscript_filename = self.job["jobdir"] + "/rush-render.py"
+        print("    Writing render script: %s" % renderscript_filename)
+        self.SaveRenderScript(renderscript_filename, python_cmd, self.job["jobdir"])
+        # Create logdir
+        self.job["logdir"] = self.job["jobdir"] + "/logs"
+        print("    Creating logdir: %s" % self.job["logdir"])
+        os.mkdir(self.job["logdir"], 0o777)
+        # Create submitinfo
+        # TODO: Build job submitinfo
+        job_title  = "HOUDINI:" + workitem.name + "/" + self.sched_name
+        job_cpus   = "iron=1"                 # TODO
+        submitinfo = ("title   %s\n"    % job_title
+                     +"cpus    %s\n"    % job_cpus
+                     +"command %s %s\n" % (python_cmd, renderscript_filename)
+                     +"logdir  %s\n"    % self.job["logdir"]
+                     )
+        # SUBMIT RUSH JOB
+        #
+        # TODO: Should we trap exceptions and pop dialog ourself,
+        #       or let houdini handle raw exception itself? The latter for now..
+        #
+        print("--- Starting rush job: %s" % job_title)
+        return self.SubmitJob(submitinfo, self.job["jobdir"])
+
+    def QueueWorkItem(self, workitem):
+        '''
+        Queue the work item for rendering by the existing rush job.
+        Save json file for the rush work item, add a frame to the rush job
+        to manage it.
+
+        Returns:
+            On Success -- returns pdg.scheduleResult.CookSucceeded
+            On Failure -- returns pdg.scheduleResult.CookFailed
+        '''
         # TODO:
         #    1) thread lock
         #    2) add work item to self.job
         #    3) unlock
         #
         # Thread will take care of adding the frame every 5 secs or some such.
+        # onCookStart() should start the child thread -- we should check if it hasn't.
         #
-        # If rush job and child thread isn't started, start them!
-        # Or if parent should do this, check if it did and fail if not.
-        #
-        return ""
+
+        rushframepad = self.frame_fmt % int(workitem.id)    # e.g. 1 -> "00001"
+
+        # Put all workitem data into a dict we can save as a json object
+        workitem_data = { "job_env":
+                            {
+                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),  # TODO: need to configure houdini?
+                                "PDG_ITEM_NAME":     str(workitem.name),
+                                "PDG_ITEM_ID":       str(workitem.id),
+                                "PDG_DIR":           str(self.workingDir(False)),
+                                "PDG_TEMP":          str(self.tempDir(False)),
+                                "PDG_SCRIPTDIR":     str(self.scriptDir(False))
+                            },
+                          "command":       str(self.expandCommandTokens(workitem.command, workitem)),
+                          "rush_frame":    "%05d" % workitem.id,
+                          "sched_name":    self.sched_name,
+                          "workitem_name": workitem.name,
+                        }
+
+        # Save rush workitem json file
+        json_filename = "%s/rush-%s.json" % (self.job["jobdir"], rushframepad)
+        print("    Writing json file: %s" % json_filename)
+        try: self.SaveJSON(json_filename, workitem_data)
+        except IOError as e:
+            print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
+            return pdg.scheduleResult.CookFailed
+
+        # Add rush frame (workitem.id) to render the work item
+        ret = os.system("rush -af %d %s" % (workitem.id, self.job["jobid"]))
+        if ret != 0:
+            # Failed to add rush frame?
+            print("ERROR: Could not add rush frame %d to jobid %s" % (workitem.id, self.job["jobid"]))
+            return pdg.scheduleResult.CookFailed
+
+        # Return success
+        return pdg.scheduleResult.CookSucceeded
 
     def onStartCook(self, static, cook_set):
-        # Custom onStartCook logic. Returns True if started.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # static        -  True if static cook
-        # cook_set      -  Set of nodes to cook
+        '''
+        Custom onStartCook logic. Returns True if started.
+        The following variables are available:
 
-        # repr(cook_set) is a list, first item is a "Processor", so see:
-        # https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
-
+            self          -  A reference to the current pdg.Scheduler instance
+            static        -  True if static cook
+            cook_set      -  Set of nodes to cook. First item in list is a "Processor" instance; see:
+                             https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
+        '''
         print("--- onStartCook [%s]" % self.sched_name)
 
         # New scheduler?
+        # TODO:
+        #     -- Should maybe dump last rush job (if any)
+        #     -- Start new child thread if none already running
+        #     -- Lock before clearing these instance variables
+        #
 
         # Reset this scheduler's dict
         self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
@@ -148,9 +232,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.job["jobid"]      = None                   # current rush jobid for workitems
         self.job["rush_frames"] = []                    # cache of rush frames to be added to job by child thread
 
+        # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
         self.setWorkingDir(wd, wd)
-
         if not self.isCallbackServerRunning():
             self.startCallbackServer()
 
@@ -167,89 +251,36 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         print("--- onSchedule [%s]" % self.sched_name)
 
-        workitem_temp_dir = str(self.tempDir(False))
-        rushframepad      = self.frame_fmt % int(workitem.id)    # e.g. 1 -> "00001"
+        rushframepad = self.frame_fmt % int(workitem.id)    # e.g. 1 -> "00001"
 
         print("         workitem.id: %d" % workitem.id)
         print("          rush frame: %s" % rushframepad)
         print("       workitem.name: %s" % workitem.name)
-        print("    workitem.tempdir: %s" % workitem_temp_dir)
+        print("    workitem.tempdir: %s" % str(self.tempDir(False)))
 
         # Ensure directories exist and serialize the work item
         self.createJobDirsAndSerializeWorkItems(workitem)
 
-        # expand the special __PDG_* tokens in the work item command
-        item_command = self.expandCommandTokens(workitem.command, workitem)
-
         # No job submitted yet? submit one
         if self.job["jobid"] == None:
-            # Create a new tempdir for this workitem
-            self.job["jobdir"] = workitem_temp_dir + "/" + workitem.name
-            os.mkdir(self.job["jobdir"])
-            # Expand python command based on workitem's PDG_PYTHON variable
-            python_cmd = self.expandCommandTokens("__PDG_PYTHON__", workitem)
-            # Create render script
-            renderscript_filename = self.job["jobdir"] + "/rush-render.py"
-            print("    Writing render script: %s" % renderscript_filename)
-            self.SaveRenderScript(renderscript_filename,
-                                  python_cmd,
-                                  self.job["jobdir"],
-                                  workitem_temp_dir)
-            # Create logdir
-            self.job["logdir"] = self.job["jobdir"] + "/logs"
-            print("    Creating logdir: %s" % self.job["logdir"])
-            os.mkdir(self.job["logdir"], 0o777)
-            # Create submitinfo
-            # TODO: Build job submitinfo
-            job_title  = "HOUDINI:" + workitem.name + "/" + self.sched_name
-            job_cpus   = "iron=1"                 # TODO
-            submitinfo = ("title   %s\n"    % job_title
-                         +"cpus    %s\n"    % job_cpus
-                         +"command %s %s\n" % (python_cmd, renderscript_filename)
-                         +"logdir  %s\n"    % self.job["logdir"]
-                         )
-            # SUBMIT RUSH JOB
-            #
-            # TODO: Should we trap exceptions and pop dialog ourself,
-            #       or let houdini handle raw exception itself? The latter for now..
-            #
-            print("--- Starting rush job: %s" % job_title)
-            (jobid, msg) = self.SubmitJob(submitinfo, self.job["jobdir"])
-            print(msg)          # show results of submit to stdout, regardless
+            # Start rush job to manage work items
+            (jobid, msg) = self.StartWorkItemJob(workitem)
+            # Show output of 'rush -submit', regardless of success|failure
+            print(msg)
             if jobid == "":
+                # Submit failed?
                 print("ERROR: 'rush -submit' failed:\n%s" % msg)
                 return pdg.scheduleResult.CookFailed
             else:
+                # Submit succeeded? save jobid..
                 self.job["jobid"] = jobid
 
-        # Put all workitem data into a dict we can save as a json object
-        workitem_data = { "job_env":
-                            {
-                                "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
-                                "PDG_ITEM_NAME":     str(workitem.name),
-                                "PDG_ITEM_ID":       str(workitem.id),
-                                "PDG_DIR":           str(self.workingDir(False)),
-                                "PDG_TEMP":          str(workitem_temp_dir),
-                                "PDG_SCRIPTDIR":     str(self.scriptDir(False))
-                            },
-                          "command":       item_command,
-                          "rush_frame":    "%05d" % workitem.id,
-                          "sched_name":    self.sched_name,
-                          "workitem_name": workitem.name,
-                        }
+        # Queue the work item
+        #     Saves work item as a json file, adds a rush frame to the job
+        #     to schedule rendering the item.
+        #
+        self.QueueWorkItem(workitem)
 
-        json_filename = "%s/rush-%s.json" % (self.job["jobdir"], rushframepad)
-        try:
-            self.SaveJSON(json_filename, workitem_data)
-            print("    Wrote json file: %s" % json_filename)
-        except IOError as e:
-            print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
-            return pdg.scheduleResult.CookFailed
-
-        self.QueueWorkItem(workitem_data)
-
-        # TODO: Queue work item for child thread
-        return pdg.scheduleResult.CookSucceeded
 
     def onTransferFile(self, file_path):
         # Custom transferFile logic. Returns True on success, else False.
@@ -367,7 +398,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         return True
 
-    def SaveRenderScript(self, filename, python_cmd, job_temp_dir, workitem_temp_dir):
+    def SaveRenderScript(self, filename, python_cmd, job_temp_dir):
         '''
         Create the rush render script that loads the json file and runs
         the houdini work item.
@@ -386,7 +417,6 @@ def LoadJSON(filename):
     fd.close()
     return data
 
-workitem_temp_dir  = "''' + workitem_temp_dir + '''"   # Houdini tempdir for this job
 job_temp_dir       = "''' + job_temp_dir      + '''"   # Rush job temp dir
 frame_fmt          = "''' + self.frame_fmt    + '''"   # Rush frame format, e.g. "%04d"
 
