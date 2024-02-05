@@ -14,7 +14,7 @@
 #
 
 # OS
-import os,sys,re,time,json,threading,re
+import os,sys,re,json
 
 # HOUDINI
 import pdg
@@ -39,11 +39,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     autodump      = False        # if true, we automatically dump jobs
 
     def __init__(self, scheduler, name):
-        """
+        '''
         __init__(self, pdg.Scheduler) -> NoneType
-
         Initializes the Scheduler with a C++ scheduler reference and name
-        """
+        '''
         print("-- INIT: [%s]" % name)
         PyScheduler.__init__(self, scheduler, name)
         CallbackServerMixin.__init__(self, True)
@@ -91,18 +90,15 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     def JobDirectory(self):
         '''
         Returns the job's working directory.
-        This is the houdini instance's "temp_dir", followed by
-        a subdirectory named after the scheduler's instance name
-        to ensure it's unique per rush job.
+        This is the houdini instance's "temp_dir" + subdirectory named after
+        the scheduler's instance name to ensure different rushschedule instances
+        don't overlap rush jobs.
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1
-                 -----------         ----- ------------------
-                   |                  |    |
-                   |                  |    scheduler instance name
-                   |                  |
-                   |                  houdini's PID
-                   |
-                   somewhere on your network drive
+                 ------------------- ----- ------------------
+                   |                  |    |__ scheduler instance name
+                   |                  |__ houdini's PID
+                   |__ somewhere on your network drive
         '''
         return self.job["jobdir"]
 
@@ -114,14 +110,14 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1/logs
                  -----------         ----- ------------------ ----
-                   |                  |    |
-                   |                  |    scheduler instance name
-                   |                  |
-                   |                  houdini's PID
-                   |
-                   somewhere on your network drive
+                   |                  |    |__ scheduler instance name
+                   |                  |__ houdini's PID
+                   |__ somewhere on your network drive
         '''
         return self.JobDirectory() + "/logs"
+
+    def LogFilename(self, frame):
+        return self.LogDirectory() + "/" + (self.frame_fmt % int(frame))
 
     def StatusDirectory(self):
         '''
@@ -136,12 +132,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         Returns the filename of a rush frame's status file.
         Status files are updated while frame is rendering:
              "Run"   -- frame is running
-             "Done"" -- frame succeeded
+             "Done"  -- frame succeeded
              "Fail"  -- frame failed
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1/status/0005.txt
                  --------------------------------------------------- --------
-                 |                                                    |
                  Status directory                                     status filename.
                                                                       One per rush-frame.
         '''
@@ -166,10 +161,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         the work_item is assigned a rush frame number (the work item's ID),
         and the work_item info necessary to run the command on the farm is
         saved as a json file.
-        
-        These files are written when houdini schedules the work_item,
-        and are read by the rush render script during rendering, which
-        contains:
+
+        These json files are written when houdini schedules the work_item,
+        and are read by the rush render script during rendering, containing:
 
             The environment variables to set
             The command to run
@@ -177,11 +171,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         Example: /some/where/pdgtemp/31768/json/0005.json
                  ------------------------- ---- ---------
-                 |                          |    |
-                 |                          |    json file (one per rush frame/work item)
-                 |                          |
-                 |                          json directory
-                 houdini temp dir
+                 houdini temp dir          |    json file
+                                    json directory
         '''
         return self.JSONDirname() + "/" + (self.frame_fmt % frame) + ".json"
 
@@ -245,15 +236,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         os.system(cmd)      # actual submit
         msg = self.LoadText(out) + self.LoadText(err) # Read back submit results
         # Check for errors
-        r = re.search(r"RUSH_JOBID.(\S+)", msg) 
+        r = re.search(r"RUSH_JOBID.(\S+)", msg)
         if r is None: return("", msg)       # Failed?
         jobid = r.groups()[0]               # Success?
         return (jobid, msg)
 
     def StartWorkItemJob(self, work_item):
-        '''
-        Start job to manage work_items
-        '''
+        '''Start job to manage work_items'''
         # Create a new jobdir for this scheduler
         if not os.path.isdir(self.JobDirectory()):
             print("           Creating jobdir: %s" % self.JobDirectory())
@@ -298,22 +287,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             On Success -- returns pdg.scheduleResult.CookSucceeded
             On Failure -- returns pdg.scheduleResult.CookFailed
         '''
-        # TODO:
-        #    1) thread lock
-        #    2) add work item to self.job
-        #    3) unlock
-        #
-        # Thread will take care of adding the frame every 5 secs or some such.
-        # onStartCook() should start the child thread -- we should check if it hasn't.
-        #
-
-        rushframe    = int(work_item.id)
-        rushframepad = self.frame_fmt % rushframe    # e.g. 1 -> "00001"
-
         # Put all work_item data into a dict we can save as a json object
         work_item_data = { "job_env":
                             {
-                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),  # TODO: need to configure houdini?
+                                # commented out to avoid RPC errors at end of renders
+                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
                                 "PDG_ITEM_NAME":     str(work_item.name),
                                 "PDG_ITEM_ID":       str(work_item.id),
                                 "PDG_DIR":           str(self.workingDir(False)),
@@ -351,7 +329,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Return success
         return pdg.scheduleResult.CookSucceeded
 
-    def onStartCook(self, static, cook_set):
+    def onStartCook(self, static, cook_set):            # HOUDINI CALLBACK
         '''
         Custom onStartCook logic. Returns True if started.
         The following variables are available:
@@ -362,7 +340,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                              https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
         '''
         print("--- onStartCook [%s]" % self.sched_name)
-
 
         # New scheduler?
         # TODO:
@@ -382,22 +359,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.setWorkingDir(wd, wd)
         if not self.isCallbackServerRunning():
             self.startCallbackServer()
-
         return True
 
-    def onSchedule(self, work_item):
-        # ERCO: This runs to start new work items (Rush frames).
-        #
-        # Custom onSchedule logic. Returns pdg.ScheduleResult.
-        #
-        # The following variables are available:
-        # self         -  A reference to the current pdg.Scheduler instance
-        # work_item     -  The pdg.WorkItem to schedule
-
+    def onSchedule(self, work_item):            # HOUDINI CALLBACK
+        '''
+        This schedules new work items (rush frames) to run on the render farm.
+            self         -  A reference to the current pdg.Scheduler instance
+            work_item    -  The pdg.WorkItem to schedule
+        Returns a pdg.ScheduleResult.
+        '''
         print("--- onSchedule [%s]" % self.sched_name)
-
         self.job["jobdir"] = self.tempDir(False) + "/" + self.sched_name
-
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
 
         print("         work_item.id: %d" % work_item.id)
@@ -409,7 +381,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Ensure directories exist and serialize the work item
         self.createJobDirsAndSerializeWorkItems(work_item)
 
-        # No job submitted yet? submit one
+        # No rush job submitted yet? submit one
         if self.job["jobid"] == None:
             # Start rush job to manage work items
             (jobid, msg) = self.StartWorkItemJob(work_item)
@@ -429,79 +401,34 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #
         self.QueueWorkItem(work_item)
 
-
-    def onTransferFile(self, file_path):
-        # Custom transferFile logic. Returns True on success, else False.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # file_path     -  Path to file that should be moved
-
-        print("--- onTransferFile")
-        return self.transferFile(file_path)
-
-    def submitAsJob(self, graph_file, node_path):
-        # Custom submitAsJob logic. Returns the status URI for the submitted job.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # graph_file    -  Path to a .hip file containing the TOP Network, relative to $PDGDIR.
-        # node_path     -  Op path to the TOP Network
-
-        print("--- submitAsJob")
+    def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
+        '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
+        print("--- submitAsJob: unused")
         return ""
 
-    def onScheduleStatic(self, dependencies, dependents, ready_items):
-        # Custom onScheduleStatic logic.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # dependencies  -  pdg.WorkItem map of dependencies
-        # dependents    -  pdg.WorkItem map of dependents
-        # ready_items   -  pdg.WorkItem array of work items
+    def onScheduleStatic(self, dependencies, dependents, ready_items):          # HOUDINI CALLBACK
+        print("--- onScheduleStatic: unused")
+        pass
 
-        print("--- onScheduleStatic:\n"
-             +"   dependents: %s\n" % repr(dependents)
-             +"  ready_items: %s" % repr(ready_items)
-             )
+    def onStart(self):                              # HOUDINI CALLBACK
+        '''Scheduler start callback'''
+        print("--- onStart: unused")
 
-        return
-
-    def onStart(self):
-        # Custom onStartCook logic. Returns True if started.
-        #
-        # Custom onStartCook logic. Returns True if started.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # static        -  True if static cook
-        # cook_set      -  Set of nodes to cook
-
-        print("--- onStart")
-        self.setWorkingDir(".", ".")  # (local,remote)
+    def onStop(self):                               # HOUDINI CALLBACK
+        '''Scheduler stop callback'''
+        print("--- onStop: unused")
         return True
 
-    def onStop(self):
-        # Custom onStop logic. Returns True if stopped.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
+    def onStopCook(self, cancel):                   # HOUDINI CALLBACK
+        '''
+        Custom onStopCook logic. Returns True if stopped.
+        ERCO: Called on regular completion, or if Task "Cancel" button is hit.
+            self    - A reference to the current pdg.Scheduler instance
+            cancel  - True if cook was cancelled
+        '''
 
-        print("--- onStop")
-        self.stopCallbackServer()
-
-        return True
-
-    def onStopCook(self, cancel):
-        # Custom onStopCook logic. Returns True if stopped.
-        # ERCO: Called on regular completion, or if Task "Cancel" button is hit.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-        # cancel        -  True if cook was cancelled
-        
-        if cancel: print("--- onStopCook [cancel? YES]")
-        else:      print("--- onStopCook [cancel? no]")
+        if cancel: print("--- onStopCook [CANCELLED]")
+        else:      print("--- onStopCook [completed normally]")
 
         # User cancelled cooking? Dump the rush job
         if cancel:
@@ -510,74 +437,66 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         return True
 
-    def onTick(self):
-        # Custom onTick logic. Returns a pdg.tickResult.
-        # Called periodically when the graph is cooking.  Can be used to check the state of
-        # running work items.  Returns a result to PDG to affect subsequent calls to `onSchedule`.
-        #
-        # The following variables are available:
-        # self          -  A reference to the current pdg.Scheduler instance
-
+    def onTick(self):                               # HOUDINI CALLBACK
+        '''
+        Called periodically when the graph is cooking.
+        Can be used to check the state of running work items.
+        Returns a pdg.tickResult.
+            self  -  A reference to the current pdg.Scheduler instance
+        '''
         from pdg import tickResult
-
         print("--- onTick")
 
         # Walk the running work_items, check for frame status files
         #
         #    Change the state accordingly when we detect a change
-        #        workItemStartCook(id) - Reports that the specified work item has started cooking. 
-        #        workItemFailed(id)    - Reports that the specified work has failed. 
-        #        workItemSuccess(id)   - Reports that the specified work item has succeeded. 
+        #        workItemStartCook(id) - Reports that the specified work item has started cooking.
+        #        workItemFailed(id)    - Reports that the specified work has failed.
+        #        workItemSuccess(id)   - Reports that the specified work item has succeeded.
         #
-        for work_id in self.work_item_ids:
+        for i in range(0, len(self.work_item_ids)):
+            work_id = self.work_item_ids[i]
             rushframe = work_id
+            if rushframe < 0: rushframe = -rushframe    # negative means already logged as finished
             status    = self.GetStatus(rushframe)
             # print("%d) %s" % (work_id, status))
             c = '?'
-            if   status == "Que":  c = u"."
-            elif status == "Run":  c = u"⬤"
-            elif status == "Done": c = u"✔"
-            elif status == "Fail": c = u"X"
+            if   status == "Que":  c = "."
+            elif status == "Run":  c = "o"
+            elif status == "Done": c = "\N{Heavy Check Mark}"   # Unicode check mark
+            elif status == "Fail": c = "X"
             sys.stdout.write(c)
 
-            if   status == "Que":  pass
-            elif status == "Run":  self.workItemStartCook(work_id, index=-1)                   # TODO: index=-1?
-            elif status == "Done": self.workItemSucceeded(work_id, index=-1, cook_duration=0)  # TODO: index=-1?, cook_duration?
-            elif status == "Fail": self.workItemFailed(work_id,    index=-1)                   # TODO: index=-1?
+            if work_id > 0:          # Not unscheduled?
+                # TODO: should probably remove from work_item_ids if Done or Fail
+                if status == "Que":
+                    pass
+                elif status == "Run":
+                    self.workItemStartCook(work_id, index=-1)                   # TODO: index=-1?
+                elif status == "Done":
+                    self.workItemSucceeded(work_id, index=-1, cook_duration=0)  # TODO: index=-1?, cook_duration?
+                    self.work_item_ids[i] = -work_id     # switch to negative on completion
+                elif status == "Fail":
+                    self.workItemFailed(work_id,    index=-1)                   # TODO: index=-1?
+                    self.work_item_ids[i] = -work_id     # switch to negative on completion
         print("")
 
         return tickResult.SchedulerReady
 
-    def getLogURI(self, work_item):
-        # Custom getLogURI logic. Returns the farm's log URI for the given task.
-        # Should return a valid URI or empty string.
-        # E.g.: 'file:///myfarm/tasklogs/jobid20.log'
-        #
-        # The following variables are available:
-        # self         -  A reference to the current pdg.Scheduler instance
-        # work_item     -  pdg.WorkItem
-
+    def getLogURI(self, work_item):                               # HOUDINI CALLBACK
+        '''Return the farm's log filename for the work_item, or an empty string if none.'''
         print("--- getLogURI")
-        return "file:///var/tmp/foo.log"    # DEBUGGING
+        rushframe = work_item.id
+        return "file://" + self.LogFilename(rushframe)
 
-    def getStatusURI(self, work_item):
-        # Custom getStatusURI logic. Returns the farm's status URI for the given task.
-        # Should return a valid URI or empty string.
-        # E.g.: 'http://myfarm/status/jobid20'
-        #
-        # The following variables are available:
-        # self         -  A reference to the current pdg.Scheduler instance
-        # work_item     -  pdg.WorkItem
+    def getStatusURI(self, work_item):                            # HOUDINI CALLBACK
+        '''Return the farm's status URI, or an empty string if none.'''
         print("--- getStatusURI")
         return ""
 
-    def endSharedServer(self, sharedserver_name):
-        # Custom endSharedServer logic. Returns True on success, else False.
-        #
-        # The following variables are available:
-        # self               -  A reference to the current pdg.Scheduler instance
-        # sharedserver_name  -  shared server name
-
+    def endSharedServer(self, sharedserver_name):                 # HOUDINI CALLBACK
+        '''Called by job or on cook end to terminate the sharedserver.'''
+        print("--- endSharedServer: unused")
         return True
 
     def SaveRenderScript(self, filename, python_cmd, job_temp_dir):

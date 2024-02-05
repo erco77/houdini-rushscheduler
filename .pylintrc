@@ -1,0 +1,60 @@
+# .pylintrc - Used by pylint checker to check files in this directory
+
+# I guess pylint needs this 'section header'
+[MASTER]
+
+# Help pylint find the ./lib we use for all our Rush*.py modules
+init-hook:'import sys; sys.path.append("./lib")'
+
+# Silence warnings about functions named MAIN_Xyz()
+function-naming-style=any
+
+# Disable certain warnings throughout all code.
+# Some code we disable line-by-line using the '# pylint: [options]' syntax.
+#
+#	multiple-statements: We sometimes use multiple statements on a single line, e.g.
+#    				if something: do_something
+#    				else:         do_other_thing
+#	too-many-branches: Yeah, whatever. I'm not gonna use a function pointer list.
+#	too-many-statements: Yeah, whatever. Production code is complicated, what can I say.
+#	too-many-return-statements: See 'too-many-statements'
+#	invalid-name: Yeah, whatever. Sometimes single letter is right for loop variables.
+#	singleton-comparison: I can test for None anyway I please, dammit
+#	consider-using-enumerate: Theres reasons for using index numbers instead of enumerating.. bite me
+#	no-else-return: Don't tell me how to live my life, I do this for clarity
+#	bad-whitespace: I can't *believe* they complain about this:
+#	                if ( sys.argv[1] == "-update" ):
+#                           ^ (bad-whitespace)       ^ (bad-whitespace)
+#                       BLOW ME.
+#       bad-continuation: Good grief, this complains about my style of:
+#                         print("<ul>\n"
+#                              +"  some indented text\n"
+#                              +"</ul>\n")
+#                              ^ (bad-continuation)
+#                         Lissen man, that makes all kinds of sense to me, don't tell me what to do.
+#	line-too-long: My help docs sometimes have long lines due to variable replacement.
+#	wrong-import-position: yeah, my use of this is stylistic.
+#	multiple-imports: I really don't see what the fuss is about with this.
+#	too-many-lines-in-module: lol, making more modules doesn't always make it better
+#	superfluous-parens: Sorry but style -- I like parens, I'm from C/C++/perl. pylint bitching about this:
+#		elif ( something == "foo" ):
+#
+disable=multiple-statements,
+	too-many-branches,
+	too-many-statements,
+	too-many-return-statements,
+	invalid-name,
+	singleton-comparison,
+	consider-using-enumerate,
+	no-else-return,
+	import-outside-toplevel,
+	bad-whitespace,
+	bad-continuation,
+	line-too-long,
+	wrong-import-position,
+	multiple-imports,
+	superfluous-parens,
+
+# Yeah, the submit scripts can be large but that's ok
+# Most of it's help and html text anyway, so leave me alone, lol
+max-module-lines=3000
