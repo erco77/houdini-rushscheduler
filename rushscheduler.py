@@ -592,6 +592,11 @@ sys.exit(0)		                            # tell rush we succeeded
         os.chmod(filename, 0o777)    # all read/exec, user/grp write
 
     def applicationBin(self, name, work_item):
+        '''
+        When node creates a command that uses an app that can be parameterized by the scheduler.
+        e.g. a ui to control which 'python' app should be used for python jobs.
+        At minimum hython and python should be supported.
+        '''
         if name == 'python':
             return self._pythonBin()
         elif name == 'hython':
