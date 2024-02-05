@@ -354,6 +354,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.job["jobid"]  = None            # current rush jobid for work_items
         self.work_item_ids = []              # clear schedule of work_item ids
 
+        # Set onTick() period
+        self['pdg_tickperiod'] = 3.0        # TODO: add to UI, value 1.0 ~ 30.0
+
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
         self.setWorkingDir(wd, wd)
@@ -445,7 +448,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             self  -  A reference to the current pdg.Scheduler instance
         '''
         from pdg import tickResult
-        print("--- onTick")
+        # print("--- onTick")
 
         # Walk the running work_items, check for frame status files
         #
@@ -454,6 +457,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #        workItemFailed(id)    - Reports that the specified work has failed.
         #        workItemSuccess(id)   - Reports that the specified work item has succeeded.
         #
+        sys.stdout.write("--- onTick(): ")
         for i in range(0, len(self.work_item_ids)):
             work_id = self.work_item_ids[i]
             rushframe = work_id
@@ -462,8 +466,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             # print("%d) %s" % (work_id, status))
             c = '?'
             if   status == "Que":  c = "."
-            elif status == "Run":  c = "o"
-            elif status == "Done": c = "\N{Heavy Check Mark}"   # Unicode check mark
+            elif status == "Run":  c = "\N{Black Large Circle}" # Unicode filled circle icon
+            elif status == "Done": c = "\N{Heavy Check Mark}"   # Unicode check mark icon
             elif status == "Fail": c = "X"
             sys.stdout.write(c)
 
