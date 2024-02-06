@@ -28,16 +28,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     """
     Rush scheduler implementation
     """
-    # job data
-    job = {
-              "jobdir": None,    # set on init
-               "jobid": None     # set when job submitted
-          }
-    sched_name    = None         # set on class init
-    frame_fmt     = "%05d"       # frame padding format char TODO: Load from rush.conf on init!
-    work_item_ids = []           # list of scheduled work_item id's
-    autodump      = False        # if true, we automatically dump jobs
-
     def __init__(self, scheduler, name):
         '''
         __init__(self, pdg.Scheduler) -> NoneType
@@ -46,8 +36,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("-- INIT: [%s]" % name)
         PyScheduler.__init__(self, scheduler, name)
         CallbackServerMixin.__init__(self, True)
-        self.sched_name = name            # save our instance name for later
-        self.parmprefix = "rush"
+
+        # job data
+        self.job = {
+                      "jobdir": None,    # set on init
+                       "jobid": None     # set when job submitted
+                   }
+        self.sched_name    = name        # save our instance name for later
+        self.frame_fmt     = "%05d"      # frame padding format char TODO: Load from rush.conf on init!
+        self.work_item_ids = []          # list of scheduled work_item id's
+        self.autodump      = False       # if true, we automatically dump jobs
+        self.parmprefix    = "rush"
 
     @classmethod
     def templateName(cls):
@@ -244,29 +243,18 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def StartWorkItemJob(self, work_item):
         '''Start job to manage work_items'''
-        # Create a new jobdir for this scheduler
-        if not os.path.isdir(self.JobDirectory()):
-            print("           Creating jobdir: %s" % self.JobDirectory())
-            os.mkdir(self.JobDirectory(), 0o777)
         # Expand python command based on work_item's PDG_PYTHON variable
         python_cmd = self.expandCommandTokens("__PDG_PYTHON__", work_item)
+
         # Create render script
         renderscript_filename = self.JobDirectory() + "/rush-render.py"
         print("    Creating render script: %s" % renderscript_filename)
         self.SaveRenderScript(renderscript_filename, python_cmd, self.JobDirectory())
-        # Create logdir
-        print("      Creating rush logdir: %s" % self.LogDirectory())
-        if not os.path.isdir(self.LogDirectory()):
-            os.mkdir(self.LogDirectory(), 0o777)
-        # Create status dir
-        print("       Creating status dir: %s" % self.StatusDirectory())
-        if not os.path.isdir(self.StatusDirectory()):
-            os.mkdir(self.StatusDirectory(), 0o777)
+
         # Create submitinfo
-        # job_title  = "HOUDINI:" + work_item.name + "/" + self.sched_name
-        job_title = self["rush_title"].evaluateString()
-        maxcpus   = self["rush_maxcpus"].evaluateString()
-        nevercpus = self["rush_nevercpus"].evaluateString()
+        job_title  = self["rush_title"].evaluateString()
+        maxcpus    = self["rush_maxcpus"].evaluateString()
+        nevercpus  = self["rush_nevercpus"].evaluateString()
         submitinfo = ("title   %s\n"    % job_title
                      +"cpus    %s\n"    % self["rush_cpus"].evaluateString()
                      +"command python3 %s\n" % renderscript_filename
@@ -302,7 +290,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                                 "PDG_ITEM_NAME":     str(work_item.name),
                                 "PDG_ITEM_ID":       str(work_item.id),
                                 "PDG_DIR":           str(self.workingDir(False)),
-                                "PDG_TEMP":          str(self.tempDir(False)),
+                                "PDG_TEMP":          str(self.tempDir(True)),
                                 "PDG_SCRIPTDIR":     str(self.scriptDir(False))
                             },
                           "command":       str(self.expandCommandTokens(work_item.command, work_item)),
@@ -311,11 +299,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                           "work_item_name": work_item.name,
                         }
 
-        # Save json file for this work_item
-        if not os.path.isdir(self.JSONDirname()):
-            # Create json subdir if it doesn't exist
-            print("    Creating json dir: %s" % self.JSONDirname())
-            os.mkdir(self.JSONDirname())
+        # Write json file for this work_item
         json_filename = self.JSONFilename(work_item.id)
         print("    Writing json file: %s" % json_filename)
         try: self.SaveJSON(json_filename, work_item_data)
@@ -347,7 +331,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                              https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
         '''
         print("--- onStartCook [%s]" % self.sched_name)
-        print("   rush_title=%s" % self["rush_title"].evaluateString())
 
         # New scheduler?
         # TODO:
@@ -380,22 +363,50 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         Returns a pdg.ScheduleResult.
         '''
         print("--- onSchedule [%s]" % self.sched_name)
-        self.job["jobdir"] = self.tempDir(False) + "/" + self.sched_name
+
+        # Set the jobdir early in onSchedule()
+        self.job["jobdir"] = self.tempDir(True) + "/" + self.sched_name
+
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
 
-        print("         work_item.id: %d" % work_item.id)
-        print("           rush frame: %s" % rushframepad)
-        print("       work_item.name: %s" % work_item.name)
-        print("    work_item.tempdir: %s" % str(self.tempDir(False)))
-        print("          rush jobdir: %s" % self.JobDirectory())
+        print("                work_item.id: %d" % work_item.id)
+        print("                  rush frame: %s" % rushframepad)
+        print("              work_item.name: %s" % work_item.name)
+        print("    work_item.tempdir[FALSE]: %s" % str(self.tempDir(True)))
+        print("                 rush jobdir: %s" % self.JobDirectory())
 
         # Ensure directories exist and serialize the work item
         self.createJobDirsAndSerializeWorkItems(work_item)
 
         # No rush job submitted yet? submit one
         if self.job["jobid"] == None:
+
+            ### CREATE ALL DIRS FOR THIS SCHEDULER ###
+
+            # Create a new jobdir for this scheduler
+            if not os.path.isdir(self.JobDirectory()):
+                print("           Creating jobdir: %s" % self.JobDirectory())
+                os.mkdir(self.JobDirectory(), 0o777)
+
+            # Create logdir
+            print("      Creating rush logdir: %s" % self.LogDirectory())
+            if not os.path.isdir(self.LogDirectory()):
+                os.mkdir(self.LogDirectory(), 0o777)
+
+            # Create json dir for job
+            if not os.path.isdir(self.JSONDirname()):
+                # Create json subdir if it doesn't exist
+                print("    Creating json dir: %s" % self.JSONDirname())
+                os.mkdir(self.JSONDirname())
+
+            # Create status dir
+            print("       Creating status dir: %s" % self.StatusDirectory())
+            if not os.path.isdir(self.StatusDirectory()):
+                os.mkdir(self.StatusDirectory(), 0o777)
+
             # Start rush job to manage work items
             (jobid, msg) = self.StartWorkItemJob(work_item)
+
             # Show output of 'rush -submit', regardless of success|failure
             print(msg)
             if jobid == "":
