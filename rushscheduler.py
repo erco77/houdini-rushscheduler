@@ -47,6 +47,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         PyScheduler.__init__(self, scheduler, name)
         CallbackServerMixin.__init__(self, True)
         self.sched_name = name            # save our instance name for later
+        self.parmprefix = "rush"
 
     @classmethod
     def templateName(cls):
@@ -262,13 +263,19 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         if not os.path.isdir(self.StatusDirectory()):
             os.mkdir(self.StatusDirectory(), 0o777)
         # Create submitinfo
-        job_title  = "HOUDINI:" + work_item.name + "/" + self.sched_name
-        job_cpus   = "iron=2 radon=2"                 # TODO - should come from Jon's UI
+        # job_title  = "HOUDINI:" + work_item.name + "/" + self.sched_name
+        job_title = self["rush_title"].evaluateString()
+        maxcpus   = self["rush_maxcpus"].evaluateString()
+        nevercpus = self["rush_nevercpus"].evaluateString()
         submitinfo = ("title   %s\n"    % job_title
-                     +"cpus    %s\n"    % job_cpus
-                     +"command %s %s\n" % (python_cmd, renderscript_filename)
+                     +"cpus    %s\n"    % self["rush_cpus"].evaluateString()
+                     +"command python3 %s\n" % renderscript_filename
                      +"logdir  %s\n"    % self.LogDirectory()
                      )
+        # Don't specify maxcpus to rush if the field is blank
+        if maxcpus   != "": submitinfo += "maxcpus %s\n" % maxcpus
+        if nevercpus != "": submitinfo += "nevercpus %s\n" % nevercpus
+
         # SUBMIT RUSH JOB
         #
         # TODO: Should we trap exceptions and pop dialog ourself,
@@ -340,6 +347,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                              https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
         '''
         print("--- onStartCook [%s]" % self.sched_name)
+        print("   rush_title=%s" % self["rush_title"].evaluateString())
 
         # New scheduler?
         # TODO:
@@ -355,7 +363,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.work_item_ids = []              # clear schedule of work_item ids
 
         # Set onTick() period
-        self['pdg_tickperiod'] = 3.0        # TODO: add to UI, value 1.0 ~ 30.0
+        self['pdg_tickperiod'] = self['rush_tickperiod'].evaluateFloat()
 
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
@@ -533,6 +541,7 @@ def UpdateStatus(filename, status):
     fd = open(tmpfilename, "w")
     fd.write(status)
     fd.close()
+    os.sync()
     os.rename(tmpfilename, filename)
 
 def Message(msg):

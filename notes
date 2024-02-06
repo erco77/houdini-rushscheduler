@@ -8,7 +8,8 @@
       or that's configured somewhere else..
 
 TODO:
-	> Slow the onTick() speed, or control from UI
+	(DONE) Slow the onTick() speed, or control from UI
+	> OPTIMIZE 'rush -af' with thread or cache
 	> Add verbose option to Jon's UI so we can tune down the tty noise
 	> Check dependency stuff
 	> How to catch pause (seems there should be an "onPause()/onResume()" callback?)
@@ -16,10 +17,12 @@ TODO:
 	  perhaps checking work_items to see if they've been paused.
 	  Need some way to sync rush <-> work_items when Pause is hit
 
+	work_item.hasFrame
+	work_Item.frame
 
 Questions:
 	> Tasks -> Pause current cook: how to resume??
-	> "dots" vs pie chart: control?
-	> Access new UI elements (Cpus, autodump options, verbose, etc)
-	> How to access the render logs? (getLogURI() is now being set, but how to access?)
+	(DONE) How to access the render logs? (getLogURI() is now being set, but how to access?)
+	(DONE) Access new UI elements (Cpus, autodump options, verbose, etc)
+	(DONE) "dots" vs pie chart: control?
 
