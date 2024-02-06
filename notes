@@ -8,10 +8,9 @@
       or that's configured somewhere else..
 
 TODO:
-	(DONE) Slow the onTick() speed, or control from UI
 	> OPTIMIZE 'rush -af' with thread or cache
 	> Add verbose option to Jon's UI so we can tune down the tty noise
-	> Check dependency stuff
+	> 
 	> How to catch pause (seems there should be an "onPause()/onResume()" callback?)
 	  We'd need to put all Que frames on pause. onTick() would need to keep running,
 	  perhaps checking work_items to see if they've been paused.
@@ -19,6 +18,9 @@ TODO:
 
 	work_item.hasFrame
 	work_Item.frame
+
+	(DONE) Check dependency stuff
+	(DONE) Slow the onTick() speed, or control from UI
 
 Questions:
 	> Tasks -> Pause current cook: how to resume??
