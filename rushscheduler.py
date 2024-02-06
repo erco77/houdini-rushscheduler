@@ -28,6 +28,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     """
     Rush scheduler implementation
     """
+    verbose = False
     def __init__(self, scheduler, name):
         '''
         __init__(self, pdg.Scheduler) -> NoneType
@@ -150,7 +151,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd.close()
         return status
 
-    def JSONDirname(self):
+    def JSONDirectory(self):
         return self.JobDirectory() + "/json"
 
     def JSONFilename(self, frame):
@@ -174,7 +175,18 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                  houdini temp dir          |    json file
                                     json directory
         '''
-        return self.JSONDirname() + "/" + (self.frame_fmt % frame) + ".json"
+        return self.JSONDirectory() + "/" + (self.frame_fmt % frame) + ".json"
+
+    def CreateJobDirectories(self):
+        '''Create job directories: jobdir, json dir, rush log dir, status dir'''
+        dirs = [ [ "Creating job directory",    self.JobDirectory()    ],
+                 [ "Creating json directory",   self.JSONDirectory()   ],
+                 [ "Creating log directory",    self.LogDirectory()    ],
+                 [ "Creating status directory", self.StatusDirectory() ] ]
+        for (msg, dirpath) in dirs:
+            print("%28s: %s" % (msg, dirpath))
+            if not os.path.isdir(dirpath):
+                os.mkdir(dirpath, 0o777)
 
     def RushJobid(self):
         '''
@@ -243,12 +255,14 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def StartWorkItemJob(self, work_item):
         '''Start job to manage work_items'''
-        # Expand python command based on work_item's PDG_PYTHON variable
-        python_cmd = self.expandCommandTokens("__PDG_PYTHON__", work_item)
+
+        # Create job dirs (json, logs, status)
+        self.CreateJobDirectories()
 
         # Create render script
+        python_cmd = self.expandCommandTokens("__PDG_PYTHON__", work_item)
         renderscript_filename = self.JobDirectory() + "/rush-render.py"
-        print("    Creating render script: %s" % renderscript_filename)
+        print("%26s: %s" % ("Creating render script", renderscript_filename))
         self.SaveRenderScript(renderscript_filename, python_cmd, self.JobDirectory())
 
         # Create submitinfo
@@ -274,10 +288,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def QueueWorkItem(self, work_item):
         '''
-        Queue the work item for rendering by the existing rush job.
-        Save json file for the rush work item, add a frame to the rush job
-        to manage it.
-
+        Queues work item for rendering in rush:
+           > Saves a json file for the work_item
+           > Adds a frame to the rush job to handle the work item
         Returns:
             On Success -- returns pdg.scheduleResult.CookSucceeded
             On Failure -- returns pdg.scheduleResult.CookFailed
@@ -285,13 +298,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Put all work_item data into a dict we can save as a json object
         work_item_data = { "job_env":
                             {
-                                # commented out to avoid RPC errors at end of renders
-                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+                                # For this list of names, see: "expandCommandTokens()" in
+                                # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
+                                #
                                 "PDG_ITEM_NAME":     str(work_item.name),
                                 "PDG_ITEM_ID":       str(work_item.id),
                                 "PDG_DIR":           str(self.workingDir(False)),
                                 "PDG_TEMP":          str(self.tempDir(True)),
-                                "PDG_SCRIPTDIR":     str(self.scriptDir(False))
+                                "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
+                                "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
+                                # commented out to avoid RPC errors at end of renders
+                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
                             },
                           "command":       str(self.expandCommandTokens(work_item.command, work_item)),
                           "rush_frame":    "%05d" % work_item.id,
@@ -301,7 +318,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Write json file for this work_item
         json_filename = self.JSONFilename(work_item.id)
-        print("    Writing json file: %s" % json_filename)
+        if self.verbose: print("    Writing json file: %s" % json_filename)
         try: self.SaveJSON(json_filename, work_item_data)
         except IOError as e:
             print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
@@ -368,47 +385,30 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.job["jobdir"] = self.tempDir(True) + "/" + self.sched_name
 
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
-
-        print("                work_item.id: %d" % work_item.id)
-        print("                  rush frame: %s" % rushframepad)
-        print("              work_item.name: %s" % work_item.name)
-        print("    work_item.tempdir[FALSE]: %s" % str(self.tempDir(True)))
-        print("                 rush jobdir: %s" % self.JobDirectory())
+        if self.verbose:
+            print("                work_item.id: %d" % work_item.id)
+            print("                  rush frame: %s" % rushframepad)
+            print("              work_item.name: %s" % work_item.name)
+            print("     work_item.tempdir[TRUE]: %s" % str(self.tempDir(True)))
+            print("    work_item.tempdir[FALSE]: %s" % str(self.tempDir(False)))
+            print("                 rush jobdir: %s" % self.JobDirectory())
 
         # Ensure directories exist and serialize the work item
+        #    This creates the houdini tempdir and {scripts,logs,data} subdirs
+        #
         self.createJobDirsAndSerializeWorkItems(work_item)
 
         # No rush job submitted yet? submit one
         if self.job["jobid"] == None:
-
-            ### CREATE ALL DIRS FOR THIS SCHEDULER ###
-
-            # Create a new jobdir for this scheduler
-            if not os.path.isdir(self.JobDirectory()):
-                print("           Creating jobdir: %s" % self.JobDirectory())
-                os.mkdir(self.JobDirectory(), 0o777)
-
-            # Create logdir
-            print("      Creating rush logdir: %s" % self.LogDirectory())
-            if not os.path.isdir(self.LogDirectory()):
-                os.mkdir(self.LogDirectory(), 0o777)
-
-            # Create json dir for job
-            if not os.path.isdir(self.JSONDirname()):
-                # Create json subdir if it doesn't exist
-                print("    Creating json dir: %s" % self.JSONDirname())
-                os.mkdir(self.JSONDirname())
-
-            # Create status dir
-            print("       Creating status dir: %s" % self.StatusDirectory())
-            if not os.path.isdir(self.StatusDirectory()):
-                os.mkdir(self.StatusDirectory(), 0o777)
-
-            # Start rush job to manage work items
+            # Start rush job (if not already):
+            #    > creates rush job dir and {json,status,logs} subdirs
+            #    > creates rush-render.py script
+            #    > creates submitinfo file
+            #    > submits rush job with no frames
+            #
             (jobid, msg) = self.StartWorkItemJob(work_item)
-
-            # Show output of 'rush -submit', regardless of success|failure
-            print(msg)
+            # Show output of starting rush job, regardless of success|failure
+            print("\033[1m" + msg + "\033[0m")
             if jobid == "":
                 # Submit failed?
                 print("ERROR: 'rush -submit' failed:\n%s" % msg)
@@ -419,7 +419,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Queue the work item
         #     Saves work item as a json file, adds a rush frame to the job
-        #     to schedule rendering the item.
+        #     to schedule the work_item for rendering..
         #
         self.QueueWorkItem(work_item)
 
@@ -476,7 +476,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #        workItemFailed(id)    - Reports that the specified work has failed.
         #        workItemSuccess(id)   - Reports that the specified work item has succeeded.
         #
-        sys.stdout.write("--- onTick(): ")
+        sys.stdout.write("--- onTick(%s): " % self.sched_name)
         for i in range(0, len(self.work_item_ids)):
             work_id = self.work_item_ids[i]
             rushframe = work_id
@@ -486,8 +486,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             c = '?'
             if   status == "Que":  c = "."
             elif status == "Run":  c = "\N{Black Large Circle}" # Unicode filled circle icon
-            elif status == "Done": c = "\N{Heavy Check Mark}"   # Unicode check mark icon
-            elif status == "Fail": c = "X"
+            elif status == "Done": c = "\033[32m" + "\N{Heavy Check Mark}" + "\033[0m"   # Unicode check mark icon
+            elif status == "Fail": c = "\033[31m" + "X" + "\033[0m"
             sys.stdout.write(c)
 
             if work_id > 0:          # Not unscheduled?
@@ -577,7 +577,7 @@ status_file = status_dir + "/" + framepad + ".txt"
 while not os.path.isdir(status_dir):
     Message("Waiting for status dir to exist (3sec retries)")
     time.sleep(3)
-Message("Creating status file: %s" % status_file)
+Message(" Creating status file: %s" % status_file)
 UpdateStatus(status_file, "Run")            # tell onTick() we're running
 
 # Load JSON file for this frame / work_item
@@ -591,7 +591,7 @@ Message("       work_item name: %s" % work_item_data["work_item_name"])
 
 # Merge current environment with vars from work_item
 job_env = os.environ.copy()
-job_env.update(work_item_data["job_env"])	# merge
+job_env.update(work_item_data["job_env"])   # merge
 
 # Execute the houdini work_item command
 print("")
@@ -604,11 +604,11 @@ exitcode = subprocess.call(work_item_data["command"], shell=True, env=job_env)
 if exitcode != 0:
     Message("FAILED (Exit code %d)" % exitcode)
     UpdateStatus(status_file, "Fail")       # tell onTick() we failed
-    sys.exit(1)		                        # tell rush we failed
+    sys.exit(1)                             # tell rush we failed
 
 Message("SUCCEEDS")
 UpdateStatus(status_file, "Done")           # tell onTick() we succeeded
-sys.exit(0)		                            # tell rush we succeeded
+sys.exit(0)                                 # tell rush we succeeded
 ''')
         fd.flush()
         fd.close()
