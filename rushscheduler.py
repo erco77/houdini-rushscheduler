@@ -476,20 +476,23 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
         '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
-        _ = (graph_file, node_path)      # unused: use these later (pylint)
+        _ = (self, graph_file, node_path)      # unused: use these later (pylint)
         print("--- submitAsJob: unused")
         return ""
 
     def onScheduleStatic(self, dependencies, dependents, ready_items):          # HOUDINI CALLBACK
-        _ = (dependencies, dependents, ready_items)      # unused: use these later (pylint)
+        '''Needs docs'''
+        _ = (self, dependencies, dependents, ready_items)      # unused: use these later (pylint)
         print("--- onScheduleStatic: unused")
 
     def onStart(self):                              # HOUDINI CALLBACK
         '''Scheduler start callback'''
+        _ = self    # unused (pylint)
         print("--- onStart: unused")
 
     def onStop(self):                               # HOUDINI CALLBACK
         '''Scheduler stop callback'''
+        _ = self    # unused (pylint)
         print("--- onStop: unused")
         return True
 
@@ -571,13 +574,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def getStatusURI(self, work_item):                            # HOUDINI CALLBACK
         '''Return the farm's status URI, or an empty string if none.'''
-        _ = work_item   # unused (pylint)
+        _ = (self, work_item)   # unused (pylint)
         print("--- getStatusURI")
         return ""
 
     def endSharedServer(self, sharedserver_name):                 # HOUDINI CALLBACK
         '''Called by job or on cook end to terminate the sharedserver.'''
-        _ = sharedserver_name   # unused (pylint)
+        _ = (self, sharedserver_name)   # unused (pylint)
         print("--- endSharedServer: unused")
         return True
 
@@ -679,6 +682,7 @@ sys.exit(0)                                 # tell rush we succeeded
         _ = work_item   # unused (pylint)
         if   name == 'python': return self._pythonBin()
         elif name == 'hython': return self._hythonBin()
+        return None     # shouldn't happen
 
 def registerTypes(type_registry):
     '''Needs docs'''
