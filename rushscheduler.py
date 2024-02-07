@@ -14,7 +14,7 @@
 #
 
 # OS
-import os,sys,re,json
+import os,sys,re,json,itertools
 
 # HOUDINI
 import pdg
@@ -43,11 +43,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                       "jobdir": None,    # set on init
                        "jobid": None     # set when job submitted
                    }
-        self.sched_name    = name        # save our instance name for later
-        self.frame_fmt     = "%05d"      # frame padding format char TODO: Load from rush.conf on init!
-        self.work_item_ids = []          # list of scheduled work_item id's
-        self.autodump      = False       # if true, we automatically dump jobs
-        self.parmprefix    = "rush"
+        self.sched_name      = name        # save our instance name for later
+        self.frame_fmt       = "%05d"      # frame padding format char TODO: Load from rush.conf on init!
+        self.rushframe_cache = []
+        self.work_item_ids   = []          # list of scheduled work_item id's
+        self.autodump        = False       # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
+        self.parmprefix      = "rush"
 
     @classmethod
     def templateName(cls):
@@ -286,6 +287,55 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("---       Starting rush job: %s" % job_title)
         return self.SubmitJob(submitinfo, self.job["jobdir"])
 
+    @staticmethod
+    def FramesAsRangeGroups(iterable):
+        '''Return possibly unsorted frames[] into a list of of (sfrm,efrm) groups'''
+        iterable = sorted(set(iterable))
+        for key, group in itertools.groupby(enumerate(iterable), lambda t: t[1] - t[0]):
+            group = list(group)
+            yield group[0][1], group[-1][1]
+
+    def FramesAsRanges(self, frames):
+        '''Compress integer framelist[] into a series of rush frame range strings, e.g.
+           [1,2,3,4,8,9,10] -> "1-4 8-10"
+        '''
+        ranges = ""
+        for (sfrm,efrm) in self.FramesAsRangeGroups(frames):
+            if ranges != "": ranges += " "
+            if sfrm == efrm: ranges += ("%d" % sfrm)
+            else:            ranges += ("%d-%d" % (sfrm,efrm))
+        return ranges
+
+    def FlushFrames(self):
+        '''Called at intervals to flush the rush frame buffer cache out to rush.
+           Compress frame list into a single 'rush -af' command frame range, if possible.
+        '''
+        print("-- FlushFrames(): %d in buffer" % len(self.rushframe_cache))
+        # Nothing to do? early exit..
+        if len(self.rushframe_cache) == 0: return
+        # Compress the frame cache
+        ranges = self.FramesAsRanges(self.rushframe_cache)
+        # Add the frame ranges to rush
+        rushcmd = "rush -af %s %s" % (ranges, self.job["jobid"])
+        print("   Executing: %s" % rushcmd)
+        if os.system(rushcmd) != 0:
+            # Failed to add rush frame?
+            emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.job["jobid"], ranges)
+            sys.stderr.write(emsg + "\n")
+            return                          # Leave frames in cache; maybe command will work later
+        # Add rush frames as work_item id schedule, so onTick() can monitor progress
+        self.work_item_ids += self.rushframe_cache
+        # empty cache
+        self.rushframe_cache = []
+
+    def PushRushFrame(self, rushframe):
+        '''Add rush frame to buffer cache for later adding to rush job.
+           Avoids running one 'rush -af' command per frame.
+           Uses a thread (or other inteval) to add frames to rush job
+           in accumulated blocks of frames.
+        '''
+        self.rushframe_cache.append(rushframe)
+
     def QueueWorkItem(self, work_item):
         '''
         Queues work item for rendering in rush:
@@ -324,15 +374,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
             return pdg.scheduleResult.CookFailed
 
-        # Add rush frame (work_item.id) to render the work item
-        ret = os.system("rush -af %d %s" % (work_item.id, self.job["jobid"]))
-        if ret != 0:
-            # Failed to add rush frame?
-            print("ERROR: Could not add rush frame %d to jobid %s" % (work_item.id, self.job["jobid"]))
-            return pdg.scheduleResult.CookFailed
-
-        # Add work_item's id to our schedule for onTick() to watch
-        self.work_item_ids.append(work_item.id)
+        # Buffer the 'rush -af' operations - build a list of rush frames
+        rushframe = work_item.id
+        self.PushRushFrame(rushframe)
 
         # Return success
         return pdg.scheduleResult.CookSucceeded
@@ -453,6 +497,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         else:      print("--- onStopCook [completed normally]")
 
         # User cancelled cooking? Dump the rush job
+        # TODO: Change this to use Jon's UI params
         if cancel:
             if self.autodump: self.DumpRushJob()        # cancel + autodump==true? dump job
             else:             self.StopRushJob()        # cancel + autodump==false? stop job (leave queued)
@@ -477,6 +522,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #        workItemSuccess(id)   - Reports that the specified work item has succeeded.
         #
         sys.stdout.write("--- onTick(%s): " % self.sched_name)
+
+        # Flush rush frame cache
+        #    Handles running 'rush -af' on a block of accumulated rush frames between ticks
+        #
+        self.FlushFrames()
+
+        # Loop thru work_item ids
         for i in range(0, len(self.work_item_ids)):
             work_id = self.work_item_ids[i]
             rushframe = work_id
