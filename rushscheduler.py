@@ -29,10 +29,20 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     '''
     Rush scheduler implementation
     '''
-    verbose = False     # TODO: Move to UI
     def __init__(self, scheduler, name):
         '''__init__(self, pdg.Scheduler) -> NoneType
            Initializes the Scheduler with a C++ scheduler reference and name
+
+           GUI Parameters:
+             x Job Title   -- rush_title      (default: PDG-$HIPNAME:$OS)
+             x RAM         -- rush_ram        (default: 16000)
+             x Priority    -- rush_priority   (default: 10)
+             x Host CPUS   -- rush_cpus       (default: +H20=30)
+             x Nevercpus   -- rush_nevercpus  (default: "")
+             x Max Cpus    -- rush_maxcpus    (default: 300)
+             x Autodump    -- rush_autodump   (default: off)  off,done,donefail,fail
+             x Verbose     -- rush_verbose    (default: off)  off,on
+             x Tick Period -- rush_tickperiod (default: 2)    1sec ... 10sec (integer)
         '''
         print("-- INIT: [%s]" % name)
         PyScheduler.__init__(self, scheduler, name)
@@ -281,14 +291,18 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         job_title  = self["rush_title"].evaluateString()
         maxcpus    = self["rush_maxcpus"].evaluateString()
         nevercpus  = self["rush_nevercpus"].evaluateString()
-        submitinfo = ("title   %s\n"    % job_title
-                     +"cpus    %s\n"    % self["rush_cpus"].evaluateString()
-                     +"command python3 %s\n" % renderscript_filename
-                     +"logdir  %s\n"    % self.LogDirectory()
+        ram        = self["rush_ram"].evaluateString()
+        submitinfo = ("title     %s\n"    % job_title
+                     +"priority  %s\n"    % self["rush_priority"].evaluateString()
+                     +"cpus      %s\n"    % self["rush_cpus"].evaluateString()
+                     +"autodump  %s\n"    % self["rush_autodump"].evaluateString()
+                     +"command   python3 %s\n" % renderscript_filename
+                     +"logdir    %s\n"    % self.LogDirectory()
                      )
         # Don't specify maxcpus to rush if the field is blank
-        if maxcpus   != "": submitinfo += "maxcpus %s\n" % maxcpus
+        if maxcpus   != "": submitinfo += "maxcpus   %s\n" % maxcpus
         if nevercpus != "": submitinfo += "nevercpus %s\n" % nevercpus
+        if ram       != "": submitinfo += "ram       %s\n" % ram
 
         # SUBMIT RUSH JOB
         #
@@ -409,6 +423,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     -- Lock before clearing these instance variables
         #
 
+        # XXX: Can't seem to do this in __init__() - bad port?
+        verbose_str = self["rush_verbose"].evaluateString()
+        if verbose_str == "on": self.verbose = True
+        else:                   self.verbose = False
+
+
         # Reset this scheduler's dict
         #TBD self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
         #TBD self.job["child_id"]   = None                   # child thread id
@@ -420,7 +440,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.rushframe_cache = []         # clear frame cache
 
         # Set onTick() period
-        self['pdg_tickperiod'] = self['rush_tickperiod'].evaluateFloat()
+        self['pdg_tickperiod'] = self["rush_tickperiod"].evaluateFloat()
 
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
