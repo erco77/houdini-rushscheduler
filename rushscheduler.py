@@ -57,8 +57,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.frame_fmt       = "%05d"    # frame padding format char TODO: Load from rush.conf on init!
         self.rushframe_cache = []
         self.work_item_ids   = []        # list of scheduled work_item id's
+        self.parmprefix      = "rush"    # access UI elements
         self.autodump        = True      # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
-        self.parmprefix      = "rush"
+        # XXX: Apparently UI elements aren't accessable within __init__()
 
     @classmethod
     def templateName(cls):
@@ -423,11 +424,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     -- Lock before clearing these instance variables
         #
 
-        # XXX: Can't seem to do this in __init__() - bad port?
-        verbose_str = self["rush_verbose"].evaluateString()
-        if verbose_str == "on": self.verbose = True
-        else:                   self.verbose = False
-
+        # XXX: Can't do this in __init__() - bad port
+        if self["rush_verbose"].evaluateString() == "on": self.verbose = True
+        else:                                             self.verbose = False
 
         # Reset this scheduler's dict
         #TBD self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
@@ -440,7 +439,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.rushframe_cache = []         # clear frame cache
 
         # Set onTick() period
-        self['pdg_tickperiod'] = self["rush_tickperiod"].evaluateFloat()
+        self["pdg_tickperiod"] = self["rush_tickperiod"].evaluateFloat()
+        #TODO: self["pdg_maxitems"] = 20
 
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
@@ -497,7 +497,15 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     Saves work item as a json file, adds a rush frame to the job
         #     to schedule the work_item for rendering..
         #
-        self.QueueWorkItem(work_item)       # XXX: For some reason we can't use return here
+        self.QueueWorkItem(work_item)       # XXX: For some reason we can't "return" here.
+                                            #      If we do, onTick() never gets called?!
+                                            #      If we don't, pylint pissed about return values
+                                            #      So for now, let pylint complain. But _why_ does:
+                                            #      return self.QueueWorkItem(work_item)
+                                            #      ..cause onTick to stop working? No errors..
+        # return None                            # XXX: returning this DOES work!
+        #return pdg.scheduleResult.CookSucceeded # XXX: this doesn't work?!
+        return None
 
     def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
         '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
