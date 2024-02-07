@@ -49,10 +49,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         CallbackServerMixin.__init__(self, True)
 
         # job data
-        self.job = {
-                      "jobdir": None,    # set on init
-                       "jobid": None     # set when job submitted
-                   }
+        self.jobdir          = None      # used by JobDirectory()
+        self.jobid           = None      # used by RushJobid()
         self.sched_name      = name      # save our instance name for later
         self.frame_fmt       = "%05d"    # frame padding format char TODO: Load from rush.conf on init!
         self.rushframe_cache = []
@@ -110,7 +108,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                    |                  |__ houdini's PID
                    |__ somewhere on your network drive
         '''
-        return self.job["jobdir"]
+        return self.jobdir
 
     def LogDirectory(self):
         '''Returns the job's rush log directory for this job.
@@ -203,11 +201,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def SetRushJobid(self, jobid):
         '''Set the current rush jobid. Use None to clear.'''
-        self.job["jobid"] = jobid
+        self.jobid = jobid
 
     def RushJobid(self):
         '''Return the current rush jobid, or None if no job is running.'''
-        return self.job["jobid"]
+        return self.jobid
 
     def DumpRushJob(self):
         '''Dump the current rush job (if any), and sets RushJobid() to None.'''
@@ -429,8 +427,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         else:                                             self.verbose = False
 
         # Reset this scheduler's dict
-        #TBD self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
-        #TBD self.job["child_id"]   = None                   # child thread id
+        #TBD self.lock       = threading.Semaphore()  # child thread semaphore lock
+        #TBD self.child_id   = None                   # child thread id
         if self.RushJobid() != None and self.autodump:
             self.DumpRushJob()
 
@@ -458,7 +456,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("--- onSchedule [%s]" % self.sched_name)
 
         # Set the jobdir early in onSchedule()
-        self.job["jobdir"] = self.tempDir(True) + "/" + self.sched_name
+        self.jobdir = self.tempDir(True) + "/" + self.sched_name
 
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
         if self.verbose:
@@ -503,8 +501,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                                             #      So for now, let pylint complain. But _why_ does:
                                             #      return self.QueueWorkItem(work_item)
                                             #      ..cause onTick to stop working? No errors..
-        # return None                            # XXX: returning this DOES work!
-        #return pdg.scheduleResult.CookSucceeded # XXX: this doesn't work?!
+        # return None                             # XXX: returning this works?!
+        # return pdg.scheduleResult.CookSucceeded # XXX: this doesn't work?!
         return None
 
     def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
