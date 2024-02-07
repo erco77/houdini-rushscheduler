@@ -1,17 +1,17 @@
 #!/usr/bin/python
 # vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=python
 
-#
-# rushscheduler.py - handle scheduling houdini (20.x) PDG work_items through rush jobs
-#
-#     VERS AUTHOR          DATE         DESCRIPTION
-#     1.00 erco@seriss.com Feb 04 2024  Initial implementation
-#
-# Workitem Files:
-#     temp_dir/<work_item_name>/json/<rush_frame#>.json  - rush frame json files (contains env settings and work_item command)
-#     temp_dir/<work_item_name>/status/<rush_frame#>.txt - rush frame status files ("Que", "Run", "Done", "Fail")
-#     temp_dir/<work_item_name>/logs/<rush_frame#>       - rush frame log files - stdout/stderr from renderer
-#
+'''
+  rushscheduler.py - handle scheduling houdini (20.x) PDG work_items through rush jobs
+
+      VERS AUTHOR          DATE         DESCRIPTION
+      1.00 erco@seriss.com Feb 04 2024  Initial implementation
+
+  Workitem Files:
+      temp_dir/<work_item_name>/json/<rush_frame#>.json  - rush frame json files (contains env settings and work_item command)
+      temp_dir/<work_item_name>/status/<rush_frame#>.txt - rush frame status files ("Que", "Run", "Done", "Fail")
+      temp_dir/<work_item_name>/logs/<rush_frame#>       - rush frame log files - stdout/stderr from renderer
+'''
 
 # OS
 import os,sys,re,json,itertools
@@ -21,18 +21,18 @@ import pdg
 from pdg.scheduler import PyScheduler
 from pdg.job.callbackserver import CallbackServerMixin
 
-class RushError(Exception):
-    pass
+#UNUSED class RushError(Exception):
+#UNUSED     '''Rush exception class'''
+#UNUSED     pass
 
 class RushScheduler(CallbackServerMixin, PyScheduler):
-    """
+    '''
     Rush scheduler implementation
-    """
-    verbose = False
+    '''
+    verbose = False     # TODO: Move to UI
     def __init__(self, scheduler, name):
-        '''
-        __init__(self, pdg.Scheduler) -> NoneType
-        Initializes the Scheduler with a C++ scheduler reference and name
+        '''__init__(self, pdg.Scheduler) -> NoneType
+           Initializes the Scheduler with a C++ scheduler reference and name
         '''
         print("-- INIT: [%s]" % name)
         PyScheduler.__init__(self, scheduler, name)
@@ -52,13 +52,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     @classmethod
     def templateName(cls):
+        '''(TBD: Needs description)'''
         return "python_scheduler"
 
     @staticmethod
     def SaveJSON(filename, data):
-        '''
-        Save json data to 'filename'
-        May raise IOError exceptions on file errors.
+        '''Save json data to 'filename'
+           May raise IOError exceptions on file errors.
         '''
         fd = open(filename, "w")
         fd.write(json.dumps(data, sort_keys=True, indent=4))
@@ -68,10 +68,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     @staticmethod
     def LoadJSON(filename):
-        '''
-        Load json data from 'filename', returns data on success.
-        May raise IOError exceptions on file errors.
-        Returns data loaded from json file.
+        '''Load json data from 'filename', returns data on success.
+           May raise IOError exceptions on file errors.
+           Returns data loaded from json file.
         '''
         fd   = open(filename, "r")
         data = json.load(fd)
@@ -80,9 +79,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     @staticmethod
     def LoadText(filename):
-        '''
-        Load text from file and return the file's contents.
-        May raise IOError exceptions on file errors.
+        '''Load text from file and return the file's contents.
+           May raise IOError exceptions on file errors.
         '''
         fd  = open(filename, "r")
         out = fd.read()
@@ -90,11 +88,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return out
 
     def JobDirectory(self):
-        '''
-        Returns the job's working directory.
-        This is the houdini instance's "temp_dir" + subdirectory named after
-        the scheduler's instance name to ensure different rushschedule instances
-        don't overlap rush jobs.
+        '''Returns the job's working directory.
+           This is the houdini instance's "temp_dir" + subdirectory named after
+           the scheduler's instance name to ensure different rushschedule instances
+           don't overlap rush jobs.
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1
                  ------------------- ----- ------------------
@@ -105,10 +102,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return self.job["jobdir"]
 
     def LogDirectory(self):
-        '''
-        Returns the rush log directory for this job.
-        This is where rush redirects the frame logs, which contains the
-        render's stdout/stderr messages during rendering.
+        '''Returns the job's rush log directory for this job.
+           This is where rush redirects the frame logs, which contains the
+           render's stdout/stderr messages during rendering.
 
         Example: /some/where/pdgtemp/31768/pdg_rushscheduler1/logs
                  -----------         ----- ------------------ ----
@@ -119,20 +115,19 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return self.JobDirectory() + "/logs"
 
     def LogFilename(self, frame):
+        '''Returns the filename of a rush frame's frame log.'''
         return self.LogDirectory() + "/" + (self.frame_fmt % int(frame))
 
     def StatusDirectory(self):
-        '''
-        Returns the filename of the rush frame status directory.
-        This directory contains status files our rush render script
-        updates for onTick() to get progress during rendering.
+        '''Returns the directory name of the rush frame status directory.
+           This directory contains status files our rush render script
+           updates for onTick() to get progress during rendering.
         '''
         return self.JobDirectory() + "/status"
 
     def StatusFilename(self, frame):
-        '''
-        Returns the filename of a rush frame's status file.
-        Status files are updated while frame is rendering:
+        '''Returns the filename of a rush frame's status file.
+           Status files are updated while frame is rendering:
              "Run"   -- frame is running
              "Done"  -- frame succeeded
              "Fail"  -- frame failed
@@ -145,6 +140,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return self.StatusDirectory() + "/" + (self.frame_fmt % frame) + ".txt"
 
     def GetStatus(self, frame):
+        '''Returns the status of a rush frame.'''
         statusfile = self.StatusFilename(frame)
         if not os.path.exists(statusfile): return "Que"
         fd = open(statusfile, "r")
@@ -153,23 +149,23 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return status
 
     def JSONDirectory(self):
+        '''Returns the job's json directory.'''
         return self.JobDirectory() + "/json"
 
     def JSONFilename(self, frame):
-        '''
-        Returns the filename of a rush frame's json file.
+        '''Returns the filename of a rush frame's json file.
 
         When houdini sends a work item to the farm for "cooking",
-        the work_item is assigned a rush frame number (the work item's ID),
-        and the work_item info necessary to run the command on the farm is
-        saved as a json file.
+        work_item is assigned a rush frame number (the work item's ID).
+        The work_item's info needed to run the command on the farm is
+        saved in a json file.
 
         These json files are written when houdini schedules the work_item,
-        and are read by the rush render script during rendering, containing:
+        and read by the rush render script during rendering, containing:
 
-            The environment variables to set
-            The command to run
-            Any other info needed during rendering.
+            > The environment variables to set
+            > The command to run
+            > Any other info needed during rendering.
 
         Example: /some/where/pdgtemp/31768/json/0005.json
                  ------------------------- ---- ---------
@@ -179,7 +175,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return self.JSONDirectory() + "/" + (self.frame_fmt % frame) + ".json"
 
     def CreateJobDirectories(self):
-        '''Create job directories: jobdir, json dir, rush log dir, status dir'''
+        '''Creates the job directories needed by a rush job:
+              > jobdir,     e.g. /some/where/<houdini-PID>/
+              > json dir,   e.g. /some/where/<houdini-PID>/json/
+              > log dir,    e.g. /some/where/<houdini-PID>/logs/
+              > status dir, e.g. /some/where/<houdini-PID>/status/
+        '''
         dirs = [ [ "Creating job directory",    self.JobDirectory()    ],
                  [ "Creating json directory",   self.JSONDirectory()   ],
                  [ "Creating log directory",    self.LogDirectory()    ],
@@ -189,47 +190,45 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             if not os.path.isdir(dirpath):
                 os.mkdir(dirpath, 0o777)
 
+    def SetRushJobid(self, jobid):
+        '''Set the current rush jobid. Use None to clear.'''
+        self.job["jobid"] = jobid
+
     def RushJobid(self):
-        '''
-        Return the current rush jobid, or None if no job is running.
-        '''
+        '''Return the current rush jobid, or None if no job is running.'''
         return self.job["jobid"]
 
     def DumpRushJob(self):
-        '''
-        Dump the current rush job, if any
-        '''
+        '''Dump the current rush job, if any'''
         if self.RushJobid() != None:
             os.system("rush -dump " + self.RushJobid())
 
     def StopRushJob(self):
-        '''
-        Pause the rush job, and change all Run frames to Que.
-        Does not dump, so user can inspect the job.
+        '''Pause the rush job, and change all Run frames to Que.
+           Does not dump, so user can inspect the job.
         '''
         if self.RushJobid() != None:
             os.system("rush -pause "   + self.RushJobid())
             os.system("rush -que Run " + self.RushJobid())
 
     def SubmitJob(self, submitinfo_str, job_temp_dir):
-        '''
-        Submit rush job.
-        'submitinfo_str' is a multiline string containing 'rush -submit' commands.  At minimum:
+        '''Submit rush job.
+           'submitinfo_str' is a multiline string containing 'rush -submit' commands.  At minimum:
 
-            title   foo
-            cpus    +any=1
-            command some_command
+                title   foo
+                cpus    +any=1
+                command some_command
 
-        It's OK if 'frames' unspecified; they can be added later. Docs for info:
-        https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Submit%20Command%20Reference
+           It's OK if 'frames' unspecified; they can be added later. Docs for info:
+           https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Submit%20Command%20Reference
 
-        Returns (jobid,output), where:
-            On success:
-                -- 'jobid' has submitted jobid
-                -- 'output' has all output from 'rush -submit'
-            On failure:
-                -- 'jobid' is ""
-                -- 'output' has error messages from rush
+           Returns (jobid,output), where:
+               On success:
+                   -- 'jobid' is submitted jobid
+                   -- 'output' has stdout/err from 'rush -submit'
+               On failure:
+                   -- 'jobid' is None
+                   -- 'output' has stdout/err from 'rush -submit'
         '''
         print("DEBUG: SubmitJob(): submitinfo:\n---\n%s---" % submitinfo_str)
 
@@ -250,13 +249,20 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         msg = self.LoadText(out) + self.LoadText(err) # Read back submit results
         # Check for errors
         r = re.search(r"RUSH_JOBID.(\S+)", msg)
-        if r is None: return("", msg)       # Failed?
+        if r is None: return(None, msg)     # Failed?
         jobid = r.groups()[0]               # Success?
         return (jobid, msg)
 
     def StartWorkItemJob(self, work_item):
-        '''Start job to manage work_items'''
-
+        '''Start job to manage work_items
+           Returns (jobid, output), where:
+               On success:
+                   -- 'jobid' is submitted jobid
+                   -- 'output' has stdout/err from 'rush -submit'
+               On failure:
+                   -- 'jobid' is None
+                   -- 'output' has stdout/err from 'rush -submit'
+        '''
         # Create job dirs (json, logs, status)
         self.CreateJobDirectories()
 
@@ -316,11 +322,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Compress the frame cache
         ranges = self.FramesAsRanges(self.rushframe_cache)
         # Add the frame ranges to rush
-        rushcmd = "rush -af %s %s" % (ranges, self.job["jobid"])
+        rushcmd = "rush -af %s %s" % (ranges, self.RushJobid())
         print("   Executing: %s" % rushcmd)
         if os.system(rushcmd) != 0:
             # Failed to add rush frame?
-            emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.job["jobid"], ranges)
+            emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.RushJobid(), ranges)
             sys.stderr.write(emsg + "\n")
             return                          # Leave frames in cache; maybe command will work later
         # Add rush frames as work_item id schedule, so onTick() can monitor progress
@@ -337,34 +343,33 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.rushframe_cache.append(rushframe)
 
     def QueueWorkItem(self, work_item):
-        '''
-        Queues work item for rendering in rush:
-           > Saves a json file for the work_item
-           > Adds a frame to the rush job to handle the work item
-        Returns:
-            On Success -- returns pdg.scheduleResult.CookSucceeded
-            On Failure -- returns pdg.scheduleResult.CookFailed
+        '''Queues work item for rendering in rush:
+               > Saves a json file for the work_item
+               > Adds a frame to the rush job to handle the work item
+            Returns:
+                On Success -- returns pdg.scheduleResult.CookSucceeded
+                On Failure -- returns pdg.scheduleResult.CookFailed
         '''
         # Put all work_item data into a dict we can save as a json object
-        work_item_data = { "job_env":
-                            {
-                                # For this list of names, see: "expandCommandTokens()" in
-                                # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
-                                #
-                                "PDG_ITEM_NAME":     str(work_item.name),
-                                "PDG_ITEM_ID":       str(work_item.id),
-                                "PDG_DIR":           str(self.workingDir(False)),
-                                "PDG_TEMP":          str(self.tempDir(True)),
-                                "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
-                                "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
-                                # commented out to avoid RPC errors at end of renders
-                                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
-                            },
-                          "command":       str(self.expandCommandTokens(work_item.command, work_item)),
-                          "rush_frame":    "%05d" % work_item.id,
-                          "sched_name":    self.sched_name,
-                          "work_item_name": work_item.name,
-                        }
+        work_item_data = {
+            "job_env": {
+                    # For this list of names, see: "expandCommandTokens()" in
+                    # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
+                    #
+                    "PDG_ITEM_NAME":     str(work_item.name),
+                    "PDG_ITEM_ID":       str(work_item.id),
+                    "PDG_DIR":           str(self.workingDir(False)),
+                    "PDG_TEMP":          str(self.tempDir(True)),
+                    "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
+                    "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
+                    # commented out to avoid RPC errors at end of renders
+                    # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+            },
+            "command":        str(self.expandCommandTokens(work_item.command, work_item)),
+            "rush_frame":     "%05d" % work_item.id,
+            "sched_name":     self.sched_name,
+            "work_item_name": work_item.name,
+        }
 
         # Write json file for this work_item
         json_filename = self.JSONFilename(work_item.id)
@@ -382,14 +387,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return pdg.scheduleResult.CookSucceeded
 
     def onStartCook(self, static, cook_set):            # HOUDINI CALLBACK
-        '''
-        Custom onStartCook logic. Returns True if started.
-        The following variables are available:
+        '''Custom onStartCook logic. Returns True if started.
+           The following variables are available:
 
-            self          -  A reference to the current pdg.Scheduler instance
-            static        -  True if static cook
-            cook_set      -  Set of nodes to cook. First item in list is a "Processor" instance; see:
-                             https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
+               self          -  A reference to the current pdg.Scheduler instance
+               static        -  True if static cook
+               cook_set      -  Set of nodes to cook. First item in list is a "Processor" instance; see:
+                                https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
         '''
         print("--- onStartCook [%s]" % self.sched_name)
 
@@ -403,8 +407,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Reset this scheduler's dict
         #TBD self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
         #TBD self.job["child_id"]   = None                   # child thread id
-        self.job["jobid"]  = None            # current rush jobid for work_items
-        self.work_item_ids = []              # clear schedule of work_item ids
+        if self.RushJobid() != None and self.autodump:
+            os.system("rush -dump " + self.RushJobid())     # dump last job
+        self.SetRushJobid(None)           # clear jobid
+        self.work_item_ids   = []         # clear schedule of work_item ids
+        self.rushframe_cache = []         # clear frame cache
 
         # Set onTick() period
         self['pdg_tickperiod'] = self['rush_tickperiod'].evaluateFloat()
@@ -417,11 +424,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return True
 
     def onSchedule(self, work_item):            # HOUDINI CALLBACK
-        '''
-        This schedules new work items (rush frames) to run on the render farm.
-            self         -  A reference to the current pdg.Scheduler instance
-            work_item    -  The pdg.WorkItem to schedule
-        Returns a pdg.ScheduleResult.
+        '''Schedules work items (rush frames) to run on the render farm.
+               self       --  A reference to the current pdg.Scheduler instance
+               work_item  --  The pdg.WorkItem to schedule
+           Returns a pdg.ScheduleResult.
         '''
         print("--- onSchedule [%s]" % self.sched_name)
 
@@ -430,20 +436,20 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
         if self.verbose:
-            print("                work_item.id: %d" % work_item.id)
-            print("                  rush frame: %s" % rushframepad)
-            print("              work_item.name: %s" % work_item.name)
-            print("     work_item.tempdir[TRUE]: %s" % str(self.tempDir(True)))
-            print("    work_item.tempdir[FALSE]: %s" % str(self.tempDir(False)))
-            print("                 rush jobdir: %s" % self.JobDirectory())
-
+            print("                work_item.id: %d" % work_item.id
+                 +"                  rush frame: %s" % rushframepad
+                 +"              work_item.name: %s" % work_item.name
+                 +"     work_item.tempdir[TRUE]: %s" % str(self.tempDir(True))
+                 +"    work_item.tempdir[FALSE]: %s" % str(self.tempDir(False))
+                 +"                 rush jobdir: %s" % self.JobDirectory()
+                 )
         # Ensure directories exist and serialize the work item
         #    This creates the houdini tempdir and {scripts,logs,data} subdirs
         #
         self.createJobDirsAndSerializeWorkItems(work_item)
 
         # No rush job submitted yet? submit one
-        if self.job["jobid"] == None:
+        if self.RushJobid() == None:
             # Start rush job (if not already):
             #    > creates rush job dir and {json,status,logs} subdirs
             #    > creates rush-render.py script
@@ -459,7 +465,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                 return pdg.scheduleResult.CookFailed
             else:
                 # Submit succeeded? save jobid..
-                self.job["jobid"] = jobid
+                self.SetRushJobid(jobid)
 
         # Queue the work item
         #     Saves work item as a json file, adds a rush frame to the job
@@ -486,11 +492,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return True
 
     def onStopCook(self, cancel):                   # HOUDINI CALLBACK
-        '''
-        Custom onStopCook logic. Returns True if stopped.
-        ERCO: Called on regular completion, or if Task "Cancel" button is hit.
-            self    - A reference to the current pdg.Scheduler instance
-            cancel  - True if cook was cancelled
+        '''Custom onStopCook logic. Returns True if stopped.
+           ERCO: Called on regular completion, or if Task "Cancel" button is hit.
+               self    - A reference to the current pdg.Scheduler instance
+               cancel  - True if cook was cancelled
         '''
 
         if cancel: print("--- onStopCook [CANCELLED]")
@@ -505,11 +510,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return True
 
     def onTick(self):                               # HOUDINI CALLBACK
-        '''
-        Called periodically when the graph is cooking.
-        Can be used to check the state of running work items.
-        Returns a pdg.tickResult.
-            self  -  A reference to the current pdg.Scheduler instance
+        '''Called periodically when the graph is cooking.
+           Can be used to check the state of running work items.
+           Returns a pdg.tickResult.
+               self  -  A reference to the current pdg.Scheduler instance
         '''
         from pdg import tickResult
         # print("--- onTick")
@@ -575,10 +579,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return True
 
     def SaveRenderScript(self, filename, python_cmd, job_temp_dir):
-        '''
-        Create the rush render script that loads the json file and runs
-        the houdini work item.
-        '''
+        '''Create the rush render script that loads json file and runs houdini work item.'''
         fd = open(filename, "w")
         # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
         fd.write('#!' + python_cmd + '''
@@ -668,10 +669,9 @@ sys.exit(0)                                 # tell rush we succeeded
         os.chmod(filename, 0o777)    # all read/exec, user/grp write
 
     def applicationBin(self, name, work_item):
-        '''
-        When node creates a command that uses an app that can be parameterized by the scheduler.
-        e.g. a ui to control which 'python' app should be used for python jobs.
-        At minimum hython and python should be supported.
+        '''When node creates a command that uses an app that can be parameterized by the scheduler.
+           e.g. a ui to control which 'python' app should be used for python jobs.
+           At minimum hython and python should be supported.
         '''
         if name == 'python':
             return self._pythonBin()
@@ -679,6 +679,7 @@ sys.exit(0)                                 # tell rush we succeeded
             return self._hythonBin()
 
 def registerTypes(type_registry):
+    '''Needs docs'''
     type_registry.registerScheduler(RushScheduler)
 
-print("\033[1m--- rushscheduler.py loaded ---\033[0m")
+print("\033[1m--- rushscheduler.py loaded ---\033[0m")  # DEBUGGING
