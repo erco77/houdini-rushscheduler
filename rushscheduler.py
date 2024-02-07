@@ -395,6 +395,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                cook_set      -  Set of nodes to cook. First item in list is a "Processor" instance; see:
                                 https://www.sidefx.com/docs/houdini/tops/pdg/Processor.html
         '''
+        _ = (static, cook_set)      # unused: use these later (pylint)
         print("--- onStartCook [%s]" % self.sched_name)
 
         # New scheduler?
@@ -471,16 +472,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     Saves work item as a json file, adds a rush frame to the job
         #     to schedule the work_item for rendering..
         #
-        self.QueueWorkItem(work_item)
+        return self.QueueWorkItem(work_item)
 
     def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
         '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
+        _ = (graph_file, node_path)      # unused: use these later (pylint)
         print("--- submitAsJob: unused")
         return ""
 
     def onScheduleStatic(self, dependencies, dependents, ready_items):          # HOUDINI CALLBACK
+        _ = (dependencies, dependents, ready_items)      # unused: use these later (pylint)
         print("--- onScheduleStatic: unused")
-        pass
 
     def onStart(self):                              # HOUDINI CALLBACK
         '''Scheduler start callback'''
@@ -497,7 +499,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                self    - A reference to the current pdg.Scheduler instance
                cancel  - True if cook was cancelled
         '''
-
         if cancel: print("--- onStopCook [CANCELLED]")
         else:      print("--- onStopCook [completed normally]")
 
@@ -570,11 +571,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def getStatusURI(self, work_item):                            # HOUDINI CALLBACK
         '''Return the farm's status URI, or an empty string if none.'''
+        _ = work_item   # unused (pylint)
         print("--- getStatusURI")
         return ""
 
     def endSharedServer(self, sharedserver_name):                 # HOUDINI CALLBACK
         '''Called by job or on cook end to terminate the sharedserver.'''
+        _ = sharedserver_name   # unused (pylint)
         print("--- endSharedServer: unused")
         return True
 
@@ -673,10 +676,9 @@ sys.exit(0)                                 # tell rush we succeeded
            e.g. a ui to control which 'python' app should be used for python jobs.
            At minimum hython and python should be supported.
         '''
-        if name == 'python':
-            return self._pythonBin()
-        elif name == 'hython':
-            return self._hythonBin()
+        _ = work_item   # unused (pylint)
+        if   name == 'python': return self._pythonBin()
+        elif name == 'hython': return self._hythonBin()
 
 def registerTypes(type_registry):
     '''Needs docs'''
