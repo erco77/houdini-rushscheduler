@@ -43,11 +43,11 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                       "jobdir": None,    # set on init
                        "jobid": None     # set when job submitted
                    }
-        self.sched_name      = name        # save our instance name for later
-        self.frame_fmt       = "%05d"      # frame padding format char TODO: Load from rush.conf on init!
+        self.sched_name      = name      # save our instance name for later
+        self.frame_fmt       = "%05d"    # frame padding format char TODO: Load from rush.conf on init!
         self.rushframe_cache = []
-        self.work_item_ids   = []          # list of scheduled work_item id's
-        self.autodump        = False       # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
+        self.work_item_ids   = []        # list of scheduled work_item id's
+        self.autodump        = True      # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
         self.parmprefix      = "rush"
 
     @classmethod
@@ -199,9 +199,14 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         return self.job["jobid"]
 
     def DumpRushJob(self):
-        '''Dump the current rush job, if any'''
+        '''Dump the current rush job (if any), and sets RushJobid() to None.'''
         if self.RushJobid() != None:
+            sys.stdout.write("\033[1m")     # highlight output
+            sys.stdout.flush()
             os.system("rush -dump " + self.RushJobid())
+            sys.stdout.write("\033[0m")
+            sys.stdout.flush()
+            self.SetRushJobid(None)
 
     def StopRushJob(self):
         '''Pause the rush job, and change all Run frames to Que.
@@ -291,7 +296,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #       or let houdini handle raw exception itself? The latter for now..
         #
         print("---       Starting rush job: %s" % job_title)
-        return self.SubmitJob(submitinfo, self.job["jobdir"])
+        return self.SubmitJob(submitinfo, self.JobDirectory())
 
     @staticmethod
     def FramesAsRangeGroups(iterable):
@@ -316,7 +321,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         '''Called at intervals to flush the rush frame buffer cache out to rush.
            Compress frame list into a single 'rush -af' command frame range, if possible.
         '''
-        print("-- FlushFrames(): %d in buffer" % len(self.rushframe_cache))
         # Nothing to do? early exit..
         if len(self.rushframe_cache) == 0: return
         # Compress the frame cache
@@ -336,9 +340,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
     def PushRushFrame(self, rushframe):
         '''Add rush frame to buffer cache for later adding to rush job.
-           Avoids running one 'rush -af' command per frame.
-           Uses a thread (or other inteval) to add frames to rush job
-           in accumulated blocks of frames.
+           This avoids running one 'rush -af' command per frame.
+           Instead we collect the frames in a cache, then at regular intervals (onTick)
+           run a single 'rush -af' command to add the cache of frames.
         '''
         self.rushframe_cache.append(rushframe)
 
@@ -409,7 +413,8 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #TBD self.job["lock"]       = threading.Semaphore()  # child thread semaphore lock
         #TBD self.job["child_id"]   = None                   # child thread id
         if self.RushJobid() != None and self.autodump:
-            os.system("rush -dump " + self.RushJobid())     # dump last job
+            self.DumpRushJob()
+
         self.SetRushJobid(None)           # clear jobid
         self.work_item_ids   = []         # clear schedule of work_item ids
         self.rushframe_cache = []         # clear frame cache
@@ -437,12 +442,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
         if self.verbose:
-            print("                work_item.id: %d" % work_item.id
-                 +"                  rush frame: %s" % rushframepad
-                 +"              work_item.name: %s" % work_item.name
-                 +"     work_item.tempdir[TRUE]: %s" % str(self.tempDir(True))
-                 +"    work_item.tempdir[FALSE]: %s" % str(self.tempDir(False))
-                 +"                 rush jobdir: %s" % self.JobDirectory()
+            print("                work_item.id: %d\n" % work_item.id
+                 +"                  rush frame: %s\n" % rushframepad
+                 +"              work_item.name: %s\n" % work_item.name
+                 +"     work_item.tempdir[TRUE]: %s\n" % str(self.tempDir(True))
+                 +"    work_item.tempdir[FALSE]: %s\n" % str(self.tempDir(False))
+                 +"                 rush jobdir: %s\n" % self.JobDirectory()
                  )
         # Ensure directories exist and serialize the work item
         #    This creates the houdini tempdir and {scripts,logs,data} subdirs
@@ -460,7 +465,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             (jobid, msg) = self.StartWorkItemJob(work_item)
             # Show output of starting rush job, regardless of success|failure
             print("\033[1m" + msg + "\033[0m")
-            if jobid == "":
+            if jobid == None:
                 # Submit failed?
                 print("ERROR: 'rush -submit' failed:\n%s" % msg)
                 return pdg.scheduleResult.CookFailed
@@ -472,7 +477,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     Saves work item as a json file, adds a rush frame to the job
         #     to schedule the work_item for rendering..
         #
-        return self.QueueWorkItem(work_item)
+        self.QueueWorkItem(work_item)       # XXX: For some reason we can't use return here
 
     def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
         '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
@@ -563,7 +568,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                     self.workItemFailed(work_id,    index=-1)                   # TODO: index=-1?
                     self.work_item_ids[i] = -work_id     # switch to negative on completion
         print("")
-
         return tickResult.SchedulerReady
 
     def getLogURI(self, work_item):                               # HOUDINI CALLBACK
