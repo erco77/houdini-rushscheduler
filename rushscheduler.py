@@ -615,8 +615,8 @@ def UpdateStatus(filename, status):
     fd = open(tmpfilename, "w")
     fd.write(status)
     fd.close()
-    os.sync()
     os.rename(tmpfilename, filename)
+    os.sync()
 
 def Message(msg):
     sys.stdout.write("--- render-script: %s\\n" % msg)
