@@ -1,30 +1,44 @@
+vim: autoindent tabstop=4 shiftwidth=4 expandtab softtabstop=4 filetype=text
+------------------------------------------------------------------------------
+
     * During "Generate Node (static)":
-	--- onStartCook [pdg_rushscheduler1]
-	--- onStopCook [completed normally]
-	--- onTick
+        --- onStartCook [pdg_rushscheduler1]
+        --- onStopCook [completed normally]
+        --- onTick
 
       Those are the only items called back.
       Either one of these controls the "dots" vs "pie chart",
       or that's configured somewhere else..
 
 TODO:
-	> OPTIMIZE 'rush -af' with thread or cache
-	> Add verbose option to Jon's UI so we can tune down the tty noise
-	> 
-	> How to catch pause (seems there should be an "onPause()/onResume()" callback?)
-	  We'd need to put all Que frames on pause. onTick() would need to keep running,
-	  perhaps checking work_items to see if they've been paused.
-	  Need some way to sync rush <-> work_items when Pause is hit
+        > Must remove Autodump UI option:
+              There's no way "done" or "donefail" can be used,
+              as the initial frameless job autodumps immediately..!
+              The only dump feature is to dump on each restart.
+              Also, should dump if the scheduler is removed (like on close of houdini)
+              Try to incercept the class destructor.
 
-	work_item.hasFrame
-	work_Item.frame
+        > Why does the complex_erco job usually not submit the work_item
+          for the ffmpeg job?! It shows there being a queued item, but it
+          doesn't get assigned.
 
-	(DONE) Check dependency stuff
-	(DONE) Slow the onTick() speed, or control from UI
+        > OPTIMIZE 'rush -af' with thread or cache
+        > Add verbose option to Jon's UI so we can tune down the tty noise
+        > 
+        > How to catch pause (seems there should be an "onPause()/onResume()" callback?)
+          We'd need to put all Que frames on pause. onTick() would need to keep running,
+          perhaps checking work_items to see if they've been paused.
+          Need some way to sync rush <-> work_items when Pause is hit
+
+        work_item.hasFrame
+        work_Item.frame
+
+        (DONE) Check dependency stuff
+        (DONE) Slow the onTick() speed, or control from UI
 
 Questions:
-	> Tasks -> Pause current cook: how to resume??
-	(DONE) How to access the render logs? (getLogURI() is now being set, but how to access?)
-	(DONE) Access new UI elements (Cpus, autodump options, verbose, etc)
-	(DONE) "dots" vs pie chart: control?
+        > Tasks -> Pause current cook: how to resume??
+        (DONE) How to access the render logs? (getLogURI() is now being set, but how to access?)
+        (DONE) Access new UI elements (Cpus, autodump options, verbose, etc)
+        (DONE) "dots" vs pie chart: control?
 
