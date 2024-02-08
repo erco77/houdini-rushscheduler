@@ -56,7 +56,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.rushframe_cache = []
         self.work_item_ids   = []        # list of scheduled work_item id's
         self.parmprefix      = "rush"    # access UI elements
-        self.autodump        = True      # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
+        self.autodump        = False     # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
         # XXX: Apparently UI elements aren't accessable within __init__()
 
     @classmethod
@@ -429,7 +429,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Reset this scheduler's dict
         #TBD self.lock       = threading.Semaphore()  # child thread semaphore lock
         #TBD self.child_id   = None                   # child thread id
-        if self.RushJobid() != None and self.autodump:
+        if self.RushJobid() != None:        # TODO: Make controllable, but not with self.autodump
             self.DumpRushJob()
 
         self.SetRushJobid(None)           # clear jobid
@@ -438,7 +438,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Set onTick() period
         self["pdg_tickperiod"] = self["rush_tickperiod"].evaluateFloat()
-        #TODO: self["pdg_maxitems"] = 20
+        self["pdg_maxitems"]   = 50
 
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
@@ -461,6 +461,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
         if self.verbose:
             print("                work_item.id: %d\n" % work_item.id
+                 +"          work_item.priority: %d\n" % work_item.priority
                  +"                  rush frame: %s\n" % rushframepad
                  +"              work_item.name: %s\n" % work_item.name
                  +"     work_item.tempdir[TRUE]: %s\n" % str(self.tempDir(True))
