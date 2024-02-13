@@ -291,12 +291,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         maxcpus    = self["rush_maxcpus"].evaluateString()
         nevercpus  = self["rush_nevercpus"].evaluateString()
         ram        = self["rush_ram"].evaluateString()
-        submitinfo = ("title     %s\n"    % job_title
-                     +"priority  %s\n"    % self["rush_priority"].evaluateString()
-                     +"cpus      %s\n"    % self["rush_cpus"].evaluateString()
-                     +"autodump  %s\n"    % self["rush_autodump"].evaluateString()
-                     +"command   python3 %s\n" % renderscript_filename
-                     +"logdir    %s\n"    % self.LogDirectory()
+        submitinfo = ("title      %s\n"    % job_title
+                     +"priority   %s\n"    % self["rush_priority"].evaluateString()
+                     +"cpus       %s\n"    % self["rush_cpus"].evaluateString()
+                     +"autodump   %s\n"    % self["rush_autodump"].evaluateString()
+                     +"command    python3 %s\n" % renderscript_filename
+                     +"logdir     %s\n"    % self.LogDirectory()
+                     +"frameflags keepnotes\n"
                      )
         # Don't specify maxcpus to rush if the field is blank
         if maxcpus   != "": submitinfo += "maxcpus   %s\n" % maxcpus
@@ -336,8 +337,17 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         '''
         # Nothing to do? early exit..
         if len(self.rushframe_cache) == 0: return
-        # Compress the frame cache
-        ranges = self.FramesAsRanges(self.rushframe_cache)
+        ranges = ""
+        item_ids = []
+        for i in range(0, len(self.rushframe_cache)):
+            frame     = self.rushframe_cache[i]
+            id_val    = frame["id"]
+            notes_str = frame["name"].replace(" ", "_")
+            priority  = frame["priority"]
+            if ranges != "": ranges += " "
+            ranges += "%d:%s" % (id_val, notes_str)       # TODO: LIMIT LINE LENGTH
+            item_ids.append(id_val)
+
         # Add the frame ranges to rush
         rushcmd = "rush -af %s %s" % (ranges, self.RushJobid())
         print("   Executing: %s" % rushcmd)
@@ -346,8 +356,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.RushJobid(), ranges)
             sys.stderr.write(emsg + "\n")
             return                          # Leave frames in cache; maybe command will work later
-        # Add rush frames as work_item id schedule, so onTick() can monitor progress
-        self.work_item_ids += self.rushframe_cache
+
+        # Tell onTick() to keep an eye on these rush frames (work item ids)
+        self.work_item_ids += item_ids
+
         # empty cache
         self.rushframe_cache = []
 
@@ -397,7 +409,10 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             return pdg.scheduleResult.CookFailed
 
         # Buffer the 'rush -af' operations - build a list of rush frames
-        rushframe = work_item.id
+        rushframe = { "id":       work_item.id,
+                      "priority": work_item.priority,
+                      "name":     work_item.name }
+        
         self.PushRushFrame(rushframe)
 
         # Return success
