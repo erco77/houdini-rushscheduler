@@ -337,25 +337,35 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         '''
         # Nothing to do? early exit..
         if len(self.rushframe_cache) == 0: return
-        ranges = ""
+        ranges   = ""
         item_ids = []
+        rushcmds = []
         for i in range(0, len(self.rushframe_cache)):
             frame     = self.rushframe_cache[i]
             id_val    = frame["id"]
             notes_str = frame["name"].replace(" ", "_")
             priority  = frame["priority"]
+            item_ids.append(id_val)
+            # Build the 'rush -af' commands
             if ranges != "": ranges += " "
             ranges += "%d:%s" % (id_val, notes_str)       # TODO: LIMIT LINE LENGTH
-            item_ids.append(id_val)
+            if len(ranges) > 2048:
+                rushcmds.append("rush -af %s %s" % (ranges, self.RushJobid()))
+                ranges = ""
+
+        if ranges != "":
+            rushcmds.append("rush -af %s %s" % (ranges, self.RushJobid()))
+            ranges = ""
 
         # Add the frame ranges to rush
-        rushcmd = "rush -af %s %s" % (ranges, self.RushJobid())
-        print("   Executing: %s" % rushcmd)
-        if os.system(rushcmd) != 0:
-            # Failed to add rush frame?
-            emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.RushJobid(), ranges)
-            sys.stderr.write(emsg + "\n")
-            return                          # Leave frames in cache; maybe command will work later
+        for i in range(0, len(rushcmds)):
+            rushcmd = rushcmds[i]
+            print("   Executing: %s" % rushcmd)
+            if os.system(rushcmd) != 0:
+                # Failed to add rush frame?
+                emsg = "WARNING: Could not add frames to rush jobid %s: %s" % (self.RushJobid(), ranges)
+                sys.stderr.write(emsg + "\n")
+                return                          # Leave frames in cache; maybe command will work later
 
         # Tell onTick() to keep an eye on these rush frames (work item ids)
         self.work_item_ids += item_ids
