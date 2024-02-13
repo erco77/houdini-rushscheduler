@@ -282,9 +282,18 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Create render script
         python_cmd = self.expandCommandTokens("__PDG_PYTHON__", work_item)
-        renderscript_filename = self.JobDirectory() + "/rush-render.py"
+
+        renderscript_filename      = self.JobDirectory() + "/rush_render.py"
         print("%26s: %s" % ("Creating render script", renderscript_filename))
         self.SaveRenderScript(renderscript_filename, python_cmd, self.JobDirectory())
+
+        renderscript_pre_filename  = self.JobDirectory() + "/rush_render_pre.py"
+        print("%26s: %s" % ("Creating render script pre", renderscript_pre_filename))
+        self.SaveRenderScriptCustom(renderscript_pre_filename,  self["rush_render_pre"].evaluateString())
+
+        renderscript_post_filename = self.JobDirectory() + "/rush_render_post.py"
+        print("%26s: %s" % ("Creating render script post", renderscript_post_filename))
+        self.SaveRenderScriptCustom(renderscript_post_filename, self["rush_render_post"].evaluateString())
 
         # Create submitinfo
         job_title  = self["rush_title"].evaluateString()
@@ -295,7 +304,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                      +"priority   %s\n"    % self["rush_priority"].evaluateString()
                      +"cpus       %s\n"    % self["rush_cpus"].evaluateString()
                      +"autodump   %s\n"    % self["rush_autodump"].evaluateString()
-                     +"command    python3 %s\n" % renderscript_filename
+                     +"command    %s %s\n" % (self["rush_pythonexe"].evaluateString(), renderscript_filename)
                      +"logdir     %s\n"    % self.LogDirectory()
                      +"frameflags keepnotes\n"
                      )
@@ -502,7 +511,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         if self.RushJobid() == None:
             # Start rush job (if not already):
             #    > creates rush job dir and {json,status,logs} subdirs
-            #    > creates rush-render.py script
+            #    > creates rush_render.py script
             #    > creates submitinfo file
             #    > submits rush job with no frames
             #
@@ -640,6 +649,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("--- endSharedServer: unused")
         return True
 
+    def SaveRenderScriptCustom(self, filename, python_code):
+        '''Create the user's custom pre/post renderscripts'''
+        fd = open(filename, "w")
+        fd.write(python_code)
+        fd.close()
+
     def SaveRenderScript(self, filename, python_cmd, job_temp_dir):
         '''Create the rush render script that loads json file and runs houdini work item.'''
         fd = open(filename, "w")
@@ -708,12 +723,18 @@ Message("       work_item name: %s" % work_item_data["work_item_name"])
 job_env = os.environ.copy()
 job_env.update(work_item_data["job_env"])   # merge
 
+# Import user's custom pre script code
+import rush_render_pre
+
 # Execute the houdini work_item command
 print("")
 Message("Executing: %s" % work_item_data["command"])
 sys.stdout.flush()
 sys.stderr.flush()
 exitcode = subprocess.call(work_item_data["command"], shell=True, env=job_env)
+
+# Import user's custom post script code
+import rush_render_post
 
 # Check for success
 if exitcode != 0:
