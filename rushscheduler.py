@@ -668,7 +668,19 @@ def LoadJSON(filename):
     """
     Load a JSON file, return as data.
     """
-    fd = open(filename, "r")
+    retries = 5
+    delay   = 5
+    for retry in range(0, retries):
+        try:
+            fd = open(filename, "r")
+            break
+        except OSError as e:
+            sys.stderr.write("WARNING: %s: %s (%d sec retries, %d/%d)\\n" % (filename, e.strerror, delay, retry, retries))
+            if retry == (retries-1):
+                Fail("Too many failures trying to load %s" % filename)
+            time.sleep(delay)        # RETRY INCASE OF "NFS Stale File Handle"
+            continue
+
     data = json.load(fd)
     fd.close()
     return data
@@ -688,6 +700,12 @@ def UpdateStatus(filename, status):
 def Message(msg):
     sys.stdout.write("--- render-script: %s\\n" % msg)
     sys.stdout.flush()
+
+def Fail(msg):
+    """Fail the render"""
+    Message(msg)
+    UpdateStatus(status_file, "Fail")       # tell onTick() we failed
+    sys.exit(1)                             # tell rush we failed
 
 job_temp_dir = "''' + job_temp_dir      + '''"   # Rush job temp dir
 frame_fmt    = "''' + self.frame_fmt    + '''"   # Rush frame format, e.g. "%04d"
@@ -717,6 +735,7 @@ while not os.path.exists(jsonfile):
     Message("Waiting for json file to exist (3sec retries)")
     time.sleep(3)
 work_item_data = LoadJSON(jsonfile)
+
 Message("       work_item name: %s" % work_item_data["work_item_name"])
 
 # Merge current environment with vars from work_item
@@ -738,9 +757,7 @@ import rush_render_post
 
 # Check for success
 if exitcode != 0:
-    Message("FAILED (Exit code %d)" % exitcode)
-    UpdateStatus(status_file, "Fail")       # tell onTick() we failed
-    sys.exit(1)                             # tell rush we failed
+    Fail("FAILED (Exit code %d)" % exitcode)
 
 Message("SUCCEEDS")
 UpdateStatus(status_file, "Done")           # tell onTick() we succeeded
