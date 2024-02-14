@@ -14,7 +14,7 @@
 '''
 
 # OS
-import os,sys,re,json,itertools
+import os,sys,re,json
 
 # HOUDINI
 import pdg
@@ -321,24 +321,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         print("---       Starting rush job: %s" % job_title)
         return self.SubmitJob(submitinfo, self.JobDirectory())
 
-    @staticmethod
-    def FramesAsRangeGroups(iterable):
-        '''Return possibly unsorted frames[] into a list of of (sfrm,efrm) groups'''
-        iterable = sorted(set(iterable))
-        for key, group in itertools.groupby(enumerate(iterable), lambda t: t[1] - t[0]):
-            group = list(group)
-            yield group[0][1], group[-1][1]
-
-    def FramesAsRanges(self, frames):
-        '''Compress integer framelist[] into a series of rush frame range strings, e.g.
-           [1,2,3,4,8,9,10] -> "1-4 8-10"
-        '''
-        ranges = ""
-        for (sfrm,efrm) in self.FramesAsRangeGroups(frames):
-            if ranges != "": ranges += " "
-            if sfrm == efrm: ranges += ("%d" % sfrm)
-            else:            ranges += ("%d-%d" % (sfrm,efrm))
-        return ranges
 
     def FlushFrames(self):
         '''Called at intervals to flush the rush frame buffer cache out to rush.
