@@ -46,3 +46,6 @@ Questions:
         (DONE) Access new UI elements (Cpus, autodump options, verbose, etc)
         (DONE) "dots" vs pie chart: control?
 
+
+Useful aliases:
+    alias lf='rush -lf -fmt "State:-6 Frame:-6 SortOrder<Sort>:-6 Try:-3 Hostname:-15 Pid:-10 Start:-14 Elapsed:-9 Notes"'

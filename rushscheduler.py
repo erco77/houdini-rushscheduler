@@ -350,18 +350,20 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         item_ids = []
         rushcmds = []
         for i in range(0, len(self.rushframe_cache)):
-            frame     = self.rushframe_cache[i]
-            id_val    = frame["id"]
-            notes_str = frame["name"].replace(" ", "_")
-            priority  = frame["priority"]
+            frame         = self.rushframe_cache[i]
+            id_val        = frame["id"]
+            frm_sortorder = frame["frm_sortorder"]
+            frm_notes     = frame["frm_notes"].replace(" ", "_")
             item_ids.append(id_val)
             # Build the 'rush -af' commands
             if ranges != "": ranges += " "
-            ranges += "%d:%s" % (id_val, notes_str)       # TODO: LIMIT LINE LENGTH
+            ranges += "%d@%s:%s" % (id_val, frm_sortorder, frm_notes)
+            # Enforce a line length limit for "rush -lf" command
             if len(ranges) > 2048:
                 rushcmds.append("rush -af %s %s" % (ranges, self.RushJobid()))
                 ranges = ""
 
+        # Handle any remaining ranges for 'rush -lf' command
         if ranges != "":
             rushcmds.append("rush -af %s %s" % (ranges, self.RushJobid()))
             ranges = ""
@@ -428,9 +430,9 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             return pdg.scheduleResult.CookFailed
 
         # Buffer the 'rush -af' operations - build a list of rush frames
-        rushframe = { "id":       work_item.id,
-                      "priority": work_item.priority,
-                      "name":     work_item.name }
+        rushframe = { "id":            work_item.id,
+                      "frm_sortorder": work_item.priority,   # save houdini frame priority as rush frame sort order
+                      "frm_notes":     work_item.name }      # save node name as rush frame notes
         
         self.PushRushFrame(rushframe)
 
