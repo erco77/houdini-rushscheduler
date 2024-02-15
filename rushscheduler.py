@@ -18,7 +18,7 @@ import os,sys,re,json
 
 # HOUDINI
 import pdg
-from pdg.scheduler import PyScheduler
+from pdg.scheduler import PyScheduler, convertEnvMapToUTF8
 from pdg.job.callbackserver import CallbackServerMixin
 
 #UNUSED class RushError(Exception):
@@ -62,8 +62,34 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
     @classmethod
     def templateName(cls):
         '''(TBD: Needs description)'''
-        return "python_scheduler"
+        return "rushscheduler"
 
+    @classmethod
+    def templateBody(cls):
+        return json.dumps({
+            "name": "rushscheduler",
+            "parameters": [
+                {
+                    "name" : "rush_inheritlocalenv",
+                    "type" : "Integer",
+                    "size" : 1,
+                    "tag" : ["pdg::scheduler"]
+                },
+                {
+                    "name" : "rush_envunset",
+                    "type" : "String",
+                    "tag" : ["pdg::scheduler"]
+                },
+                # multi of [hqueue_envname#, hqueue_envvalue#]
+                {
+                    "name" : "rush_envmulti",
+                    "label" : "Environment",
+                    "type" : "Integer",
+                    "tag" : ["pdg::scheduler"]
+                }
+            ]
+        })
+        
     @staticmethod
     def SaveJSON(filename, data):
         '''Save json data to 'filename'
@@ -382,21 +408,58 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                 On Success -- returns pdg.scheduleResult.CookSucceeded
                 On Failure -- returns pdg.scheduleResult.CookFailed
         '''
+        # Retreive the Houdini environment if the scheduler parms
+        # tell us we want to pass it on the workers.
+        job_env = self.resolveBaseEnvironment(self.parmprefix, None, work_item)
+
+        # Add common job env vars
+        job_env.update(
+            {
+                # For this list of names, see: "expandCommandTokens()" in
+                # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
+                #
+                "PDG_ITEM_NAME":     str(work_item.name),
+                "PDG_ITEM_ID":       str(work_item.id),
+                "PDG_DIR":           str(self.workingDir(False)),
+                "PDG_TEMP":          str(self.tempDir(True)),
+                "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
+                "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
+                # commented out to avoid RPC errors at end of renders
+                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+            }
+        )
+
+        # Work items can have custom environment variables, so ensure they are included
+        if work_item:
+            # check the exported attributes
+            env_map = work_item.environment
+            setmap = {}
+            for var, val in list(env_map.items()):
+                var = var.strip()#.encode('ascii', 'ignore')
+                setmap[var] = str(val)#.strip().encode('ascii', 'ignore')
+            job_env.update(setmap)
+
+        # TODO: resolve path mapping
+        # Un-comment this when we know the Rush scheduler handles path maps properly
+        # self.resolvePathMapping(job_env)
+
+        # rush env is supplied as multiparm of key:key
+        job_env_dict, removekeys = self.resolveEnvParams(
+            self.parmprefix, work_item, True)
+
+        # process any removals
+        for k in removekeys:
+            if k in job_env:
+                del job_env[k]
+
+        job_env.update(job_env_dict)
+
+        # ensure there is no unicode in the environment
+        job_env = convertEnvMapToUTF8(job_env)
+
         # Put all work_item data into a dict we can save as a json object
         work_item_data = {
-            "job_env": {
-                    # For this list of names, see: "expandCommandTokens()" in
-                    # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
-                    #
-                    "PDG_ITEM_NAME":     str(work_item.name),
-                    "PDG_ITEM_ID":       str(work_item.id),
-                    "PDG_DIR":           str(self.workingDir(False)),
-                    "PDG_TEMP":          str(self.tempDir(True)),
-                    "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
-                    "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
-                    # commented out to avoid RPC errors at end of renders
-                    # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
-            },
+            "job_env": job_env,
             "command":        str(self.expandCommandTokens(work_item.command, work_item)),
             "rush_frame":     "%05d" % work_item.id,
             "sched_name":     self.sched_name,
