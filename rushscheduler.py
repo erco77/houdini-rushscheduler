@@ -122,6 +122,16 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd.close()
         return out
 
+    def submitAsJob(self, graph_file, node_name):
+        """
+        Called by pressing the 'Submit as Job' button on the scheduler node UI.
+        Creates a job which cooks that TOP graph using hython.
+        """
+        print("----------------------------------")
+        print("------------- Hello --------------")
+        print("----------------------------------")
+        return None,None
+
     def JobDirectory(self):
         '''Returns the job's working directory.
            This is the houdini instance's "temp_dir" + subdirectory named after
@@ -586,12 +596,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # return None                             # XXX: returning this works?!
         # return pdg.scheduleResult.CookSucceeded # XXX: this doesn't work?!
         return None
-
-    def submitAsJob(self, graph_file, node_path):                               # HOUDINI CALLBACK
-        '''Custom submitAsJob logic. Returns the status URI for the submitted job.'''
-        _ = (self, graph_file, node_path)      # unused: use these later (pylint)
-        print("--- submitAsJob: unused")
-        return ""
 
     def onScheduleStatic(self, dependencies, dependents, ready_items):          # HOUDINI CALLBACK
         '''Needs docs'''
