@@ -11,6 +11,7 @@
       temp_dir/<work_item_name>/json/<rush_frame#>.json  - rush frame json files (contains env settings and work_item command)
       temp_dir/<work_item_name>/status/<rush_frame#>.txt - rush frame status files ("Que", "Run", "Done", "Fail")
       temp_dir/<work_item_name>/logs/<rush_frame#>       - rush frame log files - stdout/stderr from renderer
+
 '''
 
 # OS
@@ -58,6 +59,14 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.parmprefix      = "rush"    # access UI elements
         self.autodump        = False     # if true, we automatically dump jobs TODO: Change this to use Jon's UI params
         # XXX: Apparently UI elements aren't accessable within __init__()
+
+    def IsVerbose(self):
+        # XXX: Can't do this in __init__() - bad port
+        try:
+            if self["rush_verbose"].evaluateString() == "on": return True
+            else: return False
+        except:
+            return True     # fallback (debugging)
 
     @classmethod
     def templateName(cls):
@@ -122,15 +131,118 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         fd.close()
         return out
 
+    def _InitGraphCookWorkingDir(self):
+        """
+        Scheduler working directory.
+        """
+        # create working dir if not already set
+        # TODO: Check the GUI fields for an override for this.
+        if not self.workingDir(True):
+            self.setWorkingDir(os.environ["HIP"],   # local
+                               os.environ["HIP"])   # remote
+
+        file_root = self.workingDir(True)
+        if file_root is None:
+            raise pdg.CookError("Could not resolve working dir")
+
+        if not os.path.exists(file_root):
+            try: os.makedirs(file_root)
+            except: pass
+            if not os.path.exists(file_root):
+                raise pdg.CookError("Could not create working dir " + file_root)
+
     def submitAsJob(self, graph_file, node_name):
         """
         Called by pressing the 'Submit as Job' button on the scheduler node UI.
         Creates a job which cooks that TOP graph using hython.
+
+        Reference:
+            houdini/pdg/types/houdini/hqueue.py
+            houdini/python3.10libs/pdg/scheduler.py
+
+        Returns: (url, jobid)
         """
-        print("----------------------------------")
-        print("------------- Hello --------------")
-        print("----------------------------------")
-        return None,None
+        print("--- submitAsJob():"
+             +"    JobDirectory(): %s" % self.JobDirectory())
+
+        # XXX: We skipped some stuff here -- see hqueue.py
+        self._InitGraphCookWorkingDir()
+
+        # write the job script
+        self.transferFile(os.path.expandvars("$HHP/pdgjob/topcook.py"))
+
+        # copy the hip file and all supporting scripts
+        hip_local = os.path.expandvars("$HIPFILE")
+        hip_remote = '__PDG_DIR__/' + os.path.basename(hip_local)
+        self.transferFile(hip_local)
+        self._copyJobSupportFiles()     # XXX: ???
+
+        # Build graph cook command: single frame rush job that runs pdg graph headless
+        cmd = '"__PDG_HYTHON__" --pdg "__PDG_SCRIPTDIR__/topcook.py" --report none '\
+            '--hip "{}" --verbosity 2 --toppath {} '.format(hip_remote, node_name)
+
+        # ???
+        cmd += self._parseDatalayerParms()  # XXX: ???
+
+        # Expand the __XXX__ stuff..
+        cmd = self.expandCommandTokens(cmd, None)
+
+        # Create json/log
+        self.CreateJobDirectories()
+
+        # Save the json file
+        jobdata = {
+            "command": cmd,
+        }
+        json_filename = self.JobDirectory() + "/json/jobdata.json"
+        if self.IsVerbose(): print("    Writing json file: %s" % json_filename)
+        try: self.SaveJSON(json_filename, jobdata)
+        except IOError as e:
+            raise pdg.CookError("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
+
+        # Build the rush job
+        self.CreateJobDirectories()
+
+        # Create render script
+        python_cmd = self.expandCommandTokens("__PDG_PYTHON__", None)
+
+        renderscript_filename = self.JobDirectory() + "/graphcook-renderscript.py"
+        print("%26s: %s" % ("Creating render script", renderscript_filename))
+        self.SaveGraphCookRenderScript(renderscript_filename, python_cmd, self.JobDirectory())
+
+        # Create submitinfo
+        job_title  = self["rush_title"].evaluateString()
+        maxcpus    = self["rush_maxcpus"].evaluateString()
+        nevercpus  = self["rush_nevercpus"].evaluateString()
+        ram        = self["rush_ram"].evaluateString()
+        submitinfo = ("title      %s\n"    % job_title
+                     +"priority   %s\n"    % self["rush_priority"].evaluateString()
+                     +"cpus       %s\n"    % self["rush_cpus"].evaluateString()
+                     +"autodump   %s\n"    % self["rush_autodump"].evaluateString()
+                     +"command    %s %s\n" % (self["rush_pythonexe"].evaluateString(), renderscript_filename)
+                     +"logdir     %s\n"    % self.LogDirectory()
+                     +"frames     1\n"
+                     )
+        # Don't specify maxcpus to rush if the field is blank
+        if maxcpus   != "": submitinfo += "maxcpus   %s\n" % maxcpus
+        if nevercpus != "": submitinfo += "nevercpus %s\n" % nevercpus
+        if ram       != "": submitinfo += "ram       %s\n" % ram
+
+        # SUBMIT RUSH JOB
+        #
+        # TODO: Should we trap exceptions and pop dialog ourself,
+        #       or let houdini handle raw exception itself? The latter for now..
+        #
+        print("---       Starting rush job: %s" % job_title)
+        print("--- SUBMITINFO:\n" + submitinfo + "\n---")
+        (jobid, msg) = self.SubmitJob(submitinfo, self.JobDirectory())
+
+        # Show output of starting rush job, regardless of success|failure
+        print("\033[1m" + msg + "\033[0m")
+        if jobid == None:
+            # Submit failed?
+            raise pdg.CookError("ERROR: 'rush -submit' failed:\n%s" % msg)
+        return (jobid, jobid)
 
     def JobDirectory(self):
         '''Returns the job's working directory.
@@ -143,7 +255,16 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                    |                  |    |__ scheduler instance name
                    |                  |__ houdini's PID
                    |__ somewhere on your network drive
+
+        TODO: Maybe we need to use this someday to override: self["pdg_workingdir"].evaluateString()
         '''
+        if not self.jobdir:
+            # XXX: Let's make it ourself
+            self.jobdir = "%s/pdgtemp/%d" % (os.environ["HIP"], os.getpid())
+
+        if not os.path.isdir(self.jobdir):
+            os.mkdir(self.jobdir, 0o777)
+
         return self.jobdir
 
     def LogDirectory(self):
@@ -478,7 +599,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Write json file for this work_item
         json_filename = self.JSONFilename(work_item.id)
-        if self.verbose: print("    Writing json file: %s" % json_filename)
+        if self.IsVerbose(): print("    Writing json file: %s" % json_filename)
         try: self.SaveJSON(json_filename, work_item_data)
         except IOError as e:
             print("ERROR: SaveJSON() could not create '%s': %s" % (json_filename, e.strerror))
@@ -513,10 +634,6 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         #     -- Lock before clearing these instance variables
         #
 
-        # XXX: Can't do this in __init__() - bad port
-        if self["rush_verbose"].evaluateString() == "on": self.verbose = True
-        else:                                             self.verbose = False
-
         # Reset this scheduler's dict
         #TBD self.lock       = threading.Semaphore()  # child thread semaphore lock
         #TBD self.child_id   = None                   # child thread id
@@ -550,7 +667,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.jobdir = self.tempDir(True) + "/" + self.sched_name
 
         rushframepad = self.frame_fmt % int(work_item.id)    # e.g. 1 -> "00001"
-        if self.verbose:
+        if self.IsVerbose():
             print("                work_item.id: %d\n" % work_item.id
                  +"          work_item.priority: %d\n" % work_item.priority
                  +"                  rush frame: %s\n" % rushframepad
@@ -758,6 +875,7 @@ def Fail(msg):
     UpdateStatus(status_file, "Fail")       # tell onTick() we failed
     sys.exit(1)                             # tell rush we failed
 
+# MAIN
 job_temp_dir = "''' + job_temp_dir      + '''"   # Rush job temp dir
 frame_fmt    = "''' + self.frame_fmt    + '''"   # Rush frame format, e.g. "%04d"
 
@@ -782,9 +900,9 @@ UpdateStatus(status_file, "Run")            # tell onTick() we're running
 # Load JSON file for this frame / work_item
 jsonfile = job_temp_dir + "/json/%s.json" % framepad
 Message("    Loading json file: %s" % jsonfile)
-while not os.path.exists(jsonfile):
-    Message("Waiting for json file to exist (3sec retries)")
-    time.sleep(3)
+while not os.path.exists(jsonfile):                             # TODO: duplicate code already in LoadJSON(?
+    Message("Waiting for json file to exist (3sec retries)")    # TODO: duplicate code already in LoadJSON(?
+    time.sleep(3)                                               # TODO: duplicate code already in LoadJSON(?
 work_item_data = LoadJSON(jsonfile)
 
 Message("       work_item name: %s" % work_item_data["work_item_name"])
@@ -812,6 +930,69 @@ if exitcode != 0:
 
 Message("SUCCEEDS")
 UpdateStatus(status_file, "Done")           # tell onTick() we succeeded
+sys.exit(0)                                 # tell rush we succeeded
+''')
+        fd.flush()
+        fd.close()
+        os.sync()
+        os.chmod(filename, 0o777)    # all read/exec, user/grp write
+
+    def SaveGraphCookRenderScript(self, filename, python_cmd, job_temp_dir):
+        fd = open(filename, "w")
+        # NOTE: Beware escaped chars (e.g. \n) are expanded even inside triple quotes!
+        fd.write('#!' + python_cmd + '''
+import os,sys,json,time,subprocess
+
+# Rush Graph Cook Render Script for rushscheduler "Submit As Job" button
+
+def LoadJSON(filename):
+    """Load a JSON file, return as data."""
+    retries = 5
+    delay   = 5
+    for retry in range(0, retries):
+        try:
+            fd = open(filename, "r")
+            break
+        except OSError as e:
+            sys.stderr.write("WARNING: %s: %s (%d sec retries, %d/%d)\\n" % (filename, e.strerror, delay, retry, retries))
+            if retry == (retries-1):
+                Fail("Too many failures trying to load %s" % filename)
+            time.sleep(delay)        # RETRY INCASE OF "NFS Stale File Handle"
+            continue
+    data = json.load(fd)
+    fd.close()
+    return data
+
+def Message(msg):
+    sys.stdout.write("--- render-script: %s\\n" % msg)
+    sys.stdout.flush()
+
+def Fail(msg):
+    """Fail the render"""
+    Message(msg)
+    UpdateStatus(status_file, "Fail")       # tell onTick() we failed
+    sys.exit(1)                             # tell rush we failed
+
+# MAIN
+job_temp_dir = "''' + job_temp_dir + '''"   # Rush job temp dir
+
+# Load JSON file for this single frame rush job
+jsonfile = job_temp_dir + "/json/jobdata.json"
+Message("    Loading json file: %s" % jsonfile)
+jobdata = LoadJSON(jsonfile)
+
+# Execute the houdini work_item command
+print("")
+Message("Executing: %s" % jobdata["command"])
+sys.stdout.flush()
+sys.stderr.flush()
+# exitcode = subprocess.call(jobdata["command"], shell=True, env=job_env)
+exitcode = subprocess.call(jobdata["command"], shell=True)
+
+# Check for success
+if exitcode != 0:
+    Fail("FAILED (Exit code %d)" % exitcode)
+Message("SUCCEEDS")
 sys.exit(0)                                 # tell rush we succeeded
 ''')
         fd.flush()
