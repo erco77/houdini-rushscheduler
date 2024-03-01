@@ -151,6 +151,67 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             if not os.path.exists(file_root):
                 raise pdg.CookError("Could not create working dir " + file_root)
 
+    def GetEnvForRemotes(self, work_item):
+        '''
+        Return the environment variables we want to send to the remote workers.
+
+            work_item -- Optional work_item data (can be None)
+
+        Returns merged environment as a dict.
+        '''
+        # Retreive the Houdini environment if the scheduler parms tell us we want to pass it on the workers.
+        job_env = self.resolveBaseEnvironment(self.parmprefix, None, work_item)
+
+        # Add common job env vars
+        job_env.update(
+            {
+                # For this list of names, see: "expandCommandTokens()" in
+                # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
+                #
+                "PDG_DIR":       str(self.workingDir(False)),
+                "PDG_TEMP":      str(self.tempDir(True)),
+                "PDG_SCRIPTDIR": str(self.scriptDir(False)),
+                "PDG_HFS":       str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
+                # commented out to avoid RPC errors at end of renders
+                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
+            }
+        )
+
+        # Work items can have custom environment variables, so ensure they are included
+        if work_item:
+            job_env.update(
+                {
+                    "PDG_ITEM_NAME": str(work_item.name),
+                    "PDG_ITEM_ID":   str(work_item.id)
+                }
+            )
+            # check the exported attributes
+            env_map = work_item.environment
+            setmap = {}
+            for var, val in list(env_map.items()):
+                var = var.strip()#.encode('ascii', 'ignore')
+                setmap[var] = str(val)#.strip().encode('ascii', 'ignore')
+            job_env.update(setmap)
+
+        # TODO: resolve path mapping
+        # Un-comment this when we know the Rush scheduler handles path maps properly
+        # self.resolvePathMapping(job_env)
+
+        # rush env is supplied as multiparm of key:key
+        job_env_dict, removekeys = self.resolveEnvParams(self.parmprefix, work_item, True)
+
+        # process any removals
+        for k in removekeys:
+            if k in job_env:
+                del job_env[k]
+
+        job_env.update(job_env_dict)
+
+        # ensure there is no unicode in the environment
+        job_env = convertEnvMapToUTF8(job_env)
+
+        return job_env
+
     def submitAsJob(self, graph_file, node_name):
         """
         Called by pressing the 'Submit as Job' button on the scheduler node UI.
@@ -190,8 +251,13 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         # Create json/log
         self.CreateJobDirectories()
 
+        # Get local environment we want to send to the remotes
+        work_item = None
+        job_env = self.GetEnvForRemotes(work_item)
+
         # Save the json file
         jobdata = {
+            "job_env": job_env,
             "command": cmd,
         }
         json_filename = self.JobDirectory() + "/json/jobdata.json"
@@ -539,58 +605,12 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
                 On Success -- returns pdg.scheduleResult.CookSucceeded
                 On Failure -- returns pdg.scheduleResult.CookFailed
         '''
-        # Retreive the Houdini environment if the scheduler parms
-        # tell us we want to pass it on the workers.
-        job_env = self.resolveBaseEnvironment(self.parmprefix, None, work_item)
-
-        # Add common job env vars
-        job_env.update(
-            {
-                # For this list of names, see: "expandCommandTokens()" in
-                # https://www.sidefx.com/docs/houdini/tops/pdg/Scheduler.html
-                #
-                "PDG_ITEM_NAME":     str(work_item.name),
-                "PDG_ITEM_ID":       str(work_item.id),
-                "PDG_DIR":           str(self.workingDir(False)),
-                "PDG_TEMP":          str(self.tempDir(True)),
-                "PDG_SCRIPTDIR":     str(self.scriptDir(False)),
-                "PDG_HFS":           str(self.expandCommandTokens("__PDG_HFS__", work_item)), # ffmpegencodevideo1 node needs this
-                # commented out to avoid RPC errors at end of renders
-                # "PDG_RESULT_SERVER": str(self.workItemResultServerAddr()),
-            }
-        )
-
-        # Work items can have custom environment variables, so ensure they are included
-        if work_item:
-            # check the exported attributes
-            env_map = work_item.environment
-            setmap = {}
-            for var, val in list(env_map.items()):
-                var = var.strip()#.encode('ascii', 'ignore')
-                setmap[var] = str(val)#.strip().encode('ascii', 'ignore')
-            job_env.update(setmap)
-
-        # TODO: resolve path mapping
-        # Un-comment this when we know the Rush scheduler handles path maps properly
-        # self.resolvePathMapping(job_env)
-
-        # rush env is supplied as multiparm of key:key
-        job_env_dict, removekeys = self.resolveEnvParams(
-            self.parmprefix, work_item, True)
-
-        # process any removals
-        for k in removekeys:
-            if k in job_env:
-                del job_env[k]
-
-        job_env.update(job_env_dict)
-
-        # ensure there is no unicode in the environment
-        job_env = convertEnvMapToUTF8(job_env)
+        # Get local environment we want to send to the remotes
+        job_env = self.GetEnvForRemotes(work_item)
 
         # Put all work_item data into a dict we can save as a json object
         work_item_data = {
-            "job_env": job_env,
+            "job_env":        job_env,
             "command":        str(self.expandCommandTokens(work_item.command, work_item)),
             "rush_frame":     "%05d" % work_item.id,
             "sched_name":     self.sched_name,
@@ -911,6 +931,12 @@ Message("       work_item name: %s" % work_item_data["work_item_name"])
 job_env = os.environ.copy()
 job_env.update(work_item_data["job_env"])   # merge
 
+print("--- [WORK_ITEM] ENVIRONMENT AFTER MERGE:")
+sys.stdout.flush()
+sys.stderr.flush()
+subprocess.call("printenv | sort", shell=True, env=job_env)
+print("---")
+
 # Import user's custom pre script code
 import rush_render_pre
 
@@ -981,13 +1007,23 @@ jsonfile = job_temp_dir + "/json/jobdata.json"
 Message("    Loading json file: %s" % jsonfile)
 jobdata = LoadJSON(jsonfile)
 
+# Merge current environment with vars from work_item
+job_env = os.environ.copy()
+job_env.update(jobdata["job_env"])   # merge
+
+print("--- [GRAPH COOK] ENVIRONMENT AFTER MERGE:")
+sys.stdout.flush()
+sys.stderr.flush()
+os.system("printenv | sort")
+subprocess.call("printenv | sort", shell=True, env=job_env)
+print("---")
+
 # Execute the houdini work_item command
 print("")
 Message("Executing: %s" % jobdata["command"])
 sys.stdout.flush()
 sys.stderr.flush()
-# exitcode = subprocess.call(jobdata["command"], shell=True, env=job_env)
-exitcode = subprocess.call(jobdata["command"], shell=True)
+exitcode = subprocess.call(jobdata["command"], shell=True, env=job_env)
 
 # Check for success
 if exitcode != 0:
