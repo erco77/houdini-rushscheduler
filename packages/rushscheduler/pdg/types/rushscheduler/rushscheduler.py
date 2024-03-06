@@ -79,6 +79,94 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
             "name": "rushscheduler",
             "parameters": [
                 {
+                    "name" : "rush_tickperiod",
+                    "label": "Tick Period",
+                    "type" : "Integer",
+                    "size" : 1,
+                    "value": 2
+                },
+                {
+                    "name": "rush_title",
+                    "label": "Job Title",
+                    "type": "String",
+                    "size": 1,
+                    "value": "PDG Work Items"
+                },
+                {
+                    "name": "rush_ram",
+                    "label": "RAM",
+                    "type": "Integer",
+                    "size": 1,
+                    "value": 1000
+                },
+                {
+                    "name": "rush_priority",
+                    "label": "Priority",
+                    "type": "Integer",
+                    "size": 1,
+                    "value": 10
+                },
+                {
+                    "name": "rush_cpus",
+                    "label": "Host Cpus",
+                    "type": "String",
+                    "size": 1,
+                    "value": "+any"
+                },
+                {
+                    "name": "rush_nevercpus",
+                    "label": "Nevercpus",
+                    "type": "String",
+                    "size": 1
+                },
+                {
+                    "name": "rush_maxcpus",
+                    "label": "Maximum Cpus",
+                    "type": "Integer",
+                    "size": 1,
+                    "value": 0
+                },
+                {
+                    "name": "rush_autodump",
+                    "label": "Autodump",
+                    "type": "String",
+                    "size": 1,
+                    "value": "off",
+                },
+                {
+                    "name": "rush_verbose",
+                    "label": "Verbose",
+                    "type": "String",
+                    "size": 1,
+                    "value": "off"
+                },
+                {
+                    "name": "rush_pythonexe",
+                    "label": "Python Binary",
+                    "type": "String",
+                    "size": 1,
+                    "value": "python3"
+                },
+                {
+                    "name": "rush_render_pre",
+                    "label": "Pre-Render Python",
+                    "type": "String",
+                    "size": 1
+                },
+                {
+                    "name": "rush_render_post",
+                    "label": "Post-Render Python",
+                    "type": "String",
+                    "size": 1
+                },
+                {
+                    "name" : "submitjobname",
+                    "label": "Job Name",
+                    "type" : "String",
+                    "size" : 1,
+                    "value": "PDG Graph"
+                },
+                {
                     "name" : "rush_inheritlocalenv",
                     "type" : "Integer",
                     "size" : 1,
