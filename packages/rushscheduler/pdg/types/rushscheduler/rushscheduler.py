@@ -365,7 +365,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.SaveGraphCookRenderScript(renderscript_filename, python_cmd, self.JobDirectory())
 
         # Create submitinfo
-        job_title  = self["rush_title"].evaluateString()
+        job_title  = self["submitjobname"].evaluateString().replace(' ', '_')
         maxcpus    = self["rush_maxcpus"].evaluateString()
         nevercpus  = self["rush_nevercpus"].evaluateString()
         ram        = self["rush_ram"].evaluateString()
@@ -607,7 +607,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
         self.SaveRenderScriptCustom(renderscript_post_filename, self["rush_render_post"].evaluateString())
 
         # Create submitinfo
-        job_title  = self["rush_title"].evaluateString()
+        job_title  = self["rush_title"].evaluateString().replace(' ', '_')
         maxcpus    = self["rush_maxcpus"].evaluateString()
         nevercpus  = self["rush_nevercpus"].evaluateString()
         ram        = self["rush_ram"].evaluateString()
@@ -754,7 +754,7 @@ class RushScheduler(CallbackServerMixin, PyScheduler):
 
         # Set onTick() period
         self["pdg_tickperiod"] = self["rush_tickperiod"].evaluateFloat()
-        self["pdg_maxitems"]   = 50
+        self["pdg_maxitems"]   = 150
 
         # Houdini advises these lines..
         wd = self["pdg_workingdir"].evaluateString()
@@ -1084,7 +1084,6 @@ def Message(msg):
 def Fail(msg):
     """Fail the render"""
     Message(msg)
-    UpdateStatus(status_file, "Fail")       # tell onTick() we failed
     sys.exit(1)                             # tell rush we failed
 
 # MAIN
