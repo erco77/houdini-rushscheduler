@@ -1,0 +1,221 @@
+#type:     node
+#context:  top
+#internal: rushscheduler
+#icon:     TOP/rush_monkey.png
+#since: 20.0
+
+= Rush Scheduler =
+
+"""The PDG scheduler for Rush render queue software."""
+
+== Overview ==
+
+This scheduler node utilizes Thinkbox's Deadline to schedule and execute PDG work items on a Deadline farm.
+
+To use this scheduler, you need to have the Deadline client installed and working on your local machine. Additionally, you must also have Deadline set-up on your farm machines to receive and execute jobs. 
+
+== Scheduling ==
+
+This node can do two types of scheduling using a Rush render queue farm:
+
+* The first type of scheduling runs an instance of Houdini on a local submission machine that coordinates the PDG cook on the farm and waits until the cook has completed. This allows you to cook the entire TOP graph, only part of the TOP graph, or a specific node. 
+
+    With this scheduling type, the node schedules a job containing many tasks, each task scheduled for a generated work item, and if necessary, schedules a second Message Queue (MQ) job to run the MQ server that receives the work item results over the network. For more information on MQ, see the [Message Queue|#messagequeue] section below.
+
+    If the __Schedule Work Items as Jobs__ parameter is checked on, then the node schedules jobs for the generated work items, rather than tasks, with each job containing exactly one task.  The node also schedules an additional Message Queue (MQ) job if necessary.  Please see the __Schedule Work Items as Jobs__ documentation to learn about when you may want to schedule work items as jobs instead of as tasks.
+
+* The second type of scheduling uses [Submit as Job|#submitgraph]. 
+
+    With this scheduling type, the node schedules a hython session that opens up the current `.hip` file and cooks the entire TOP network. If the TOP network uses the Deadline scheduler node(s), then additional jobs might also be scheduled on the farm, and those jobs will follow the scheduling behavior mentioned above.
+
+
+== Installation ==
+
+# Install and configure the Rush render queue software.  See the main page for instructions:
+    [https://www.seriss.com/rush/]
+
+# The main Rush command `rush` (Windows: `rush.exe`) should be in your system path.  If Rush is installed, this should aleady be set up.
+
+
+@parameters
+
+== Scheduler ==
+
+Global parameters for all work items.
+
+~~~~ Rush ~~~~
+
+    Verbose:
+        #id: rush_verbose
+
+        When on, information is printed out to the console that could be useful for debugging problems during cooking.
+
+    :include _scheduler_common#pdg_tickperiod:
+
+    :include _scheduler_common#pdg_maxitems:
+
+    :include _scheduler_common#pdg_maxtasks:
+
+    :include _scheduler_common#pdg_waitforfailures:
+
+    ~~~~ Paths ~~~~
+
+        Python Binary:
+            #id: rush_pythonexe
+
+            Specifies the rooted path to Python that should point to the required Python version installed on all machines (for example, `$HFS/bin/python`).
+
+        Local Shared Path:
+            #id: pdg_workingdir
+
+            Specifies the root path on your local machine that points to the directory where the job generates intermediate files and output. The intermediate files are placed in a subdirectory. 
+
+            Use this parameter if your local and farm machines have the same path configuration.
+        
+        :include _scheduler_common#pdg_workitemdatasource:
+
+        :include _scheduler_common#pdg_deletetempdir:
+
+        :include _scheduler_common#pdg_compressworkitemdata:
+
+        :include _scheduler_common#pdg_validateoutputs:
+
+        :include _scheduler_common#pdg_checkexpectedoutputs:
+
+== Job Spec == 
+
+~~~~ Job Description ~~~~
+
+    Title:
+        #id: rush_title
+
+        A text string that describes the job, which will appear in job reports, audit logs, etc.
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Title]
+
+~~~~ Job Options ~~~~
+
+    RAM:
+        #id: rush_ram
+
+        All jobs should have a Ram value that tells the system how much memory each process is expected to use. Values are in MB, and are compared against the values shown in the Ram column of List All Cpus reports (`rush -lah`).
+
+        While job is running, the configured Ram value is compared against the available ram on the remote processors. If the amount of ram your job wants is more than the remote machine has available, then the frame will not be started. This behavior prevents large jobs from swapping the machines by starting too many jobs at once, or running on machines lacking ram capability.
+
+        The job's ram value is passed to the render script via the RUSH_RAM environment variable which can optionally use this value to actually limit its ram use.
+
+        The default is 0, which allows the job to run without ram requirements.
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Ram]
+    
+    Priority:
+        #id: rush_priority
+
+        The 'priority' value is used when cpus commands don't specify a priority value, i.e., 'cpus tahoe=4'. In such a case, the value set by 'priority' is used.
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Priority]
+    
+    Host Cpus:
+        #id: rush_cpus
+
+        Tells rush which remote machines are to be used during rendering. It is an error not to specify any cpus.
+
+        More than one 'cpus' command can appear; multiple instances of the command are cumulative. Also, multiple cpu specifications can appear on the same line (separated by spaces). Combinations can also be used.
+
+        When specifying a cpu, your are telling rush at least three things:
+        - The name of the host (or hosts when hostgroups are specified)
+        - The number of cpus to use on that host (or hosts)
+        - The job's priority to use when running on that host
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#Cpus]
+
+    Nevercpus:
+        #id: rush_nevercpus
+
+        Sets hostnames or +hostgroups that should never be used for rendering. Overrides any Cpus specifications, ensuring hosts are not used even if specified by name in the Cpus list. More than one NeverCpus command can appear; multiple instances of the command are cumulative.
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#NeverCpus]
+
+    Autodump:
+        #id: rush_autodump
+
+        Enables a job to automatically dump itself.  Can be any of:
+
+        autodump off:
+            Don't autodump; job remains when frames are DONE
+
+        autodump done:
+            Job dumps itself when all frames are DONE
+
+        autodump fail:
+            Job dumps itself if job finishes with any FAIL frames
+
+        autodump donefail:
+            Job dumps itself if all frames are DONE or FAIL
+
+        In the case of 'autodump done', the job will not dump if there were any FAIL frames. If you want it to dump anyway, then use 'autodump donefail'.
+
+    Maximum Cpus:
+        #id: rush_maxcpus
+    
+        Sets the maximum number of cpus a job can use.
+
+        Puts a cap on the entire job. If set to 0, there is no limit.
+
+        [Rush Documentation|https://www.seriss.com/rush.103.00/rush/rush-submit-cmds.html#MaxCpus]
+
+== Submit as Job ==
+    #id: submitgraph
+
+    Allows you to schedule a standalone job (a job that does _not_ require Houdini to be running) on your Rush farm that cooks the current TOP network.
+
+    The parameters below determine the behavior of this job.
+
+    Submit:
+        #id: submitjob
+
+        Cooks the current TOP network as a standalone job in a `hython` session on your Rush farm.
+
+    Job Name:
+        #id: submitjobname
+
+        Specifies the Rush title to use for the Job.
+
+== Job Parms ==
+
+~~~ Task Environment ~~~
+
+    Inherit Local Environment:
+        #id: rush_inheritlocalenv
+
+        When on, the environment variables in the current Houdini session are copied into the job's environment.
+
+    Unset Variables:
+        #id: rush_envunset
+
+        Space-separated list of environment variables that should be unset in the task environment.
+
+    Environment Variables:
+        #id: rush_envmulti
+
+        Adds custom key-value environment variables to each task.
+
+~~~ Job Scripts ~~~
+    Pre-Render Python:
+        #id: rush_render_pre
+
+        Python code to execute in a separate process before the main render command.
+
+    Post-Render Python:
+        #id: rush_render_post
+
+        Python code to execute in a separate process after the main render command.
+
+@related
+
+- [Node:top/deadlinescheduler]
+- [Node:top/localscheduler]
+- [Node:top/hqueuescheduler]
+- [Node:top/tractorscheduler]
+- [Node:top/pythonscheduler]
+- [MQ Server|/ref/utils/mqserver]

@@ -1,0 +1,11 @@
+{
+    "hpath": "$HOUDINI_RUSHSCHEDULER",
+    "load_package_once": true,
+    "enable": "houdini_version >= '20.0'",
+    "version": "1.0.0",
+    "env": [
+        {
+            "HOUDINI_RUSHSCHEDULER": "$HOUDINI_PACKAGE_PATH/rushscheduler"
+        }
+    ]
+}
